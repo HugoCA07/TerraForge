@@ -36,3 +36,16 @@ Commit your changes (git commit -m 'Add some AmazingFeature').
 Push to the Branch (git push origin feature/AmazingFeature).
 
 Open a Pull Request.
+
+🗺️ Roadmap
+
+
+[~] Basic movement and sprite rendering.
+
+[~] Tile-based building system.
+
+[~] Procedural biomes, caves and minerals generation (Forest, Desert, etc...).
+
+[ ] Enemy AI implementation (A* Pathfinding).
+
+[ ] Multiplayer support (UDP/TCP).
