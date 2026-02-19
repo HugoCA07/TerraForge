@@ -4,17 +4,39 @@
 
 // Constructor
 Game::Game()
-: mWindow(sf::VideoMode(1920, 1080), "TerraForge C++")
-, mPlayer()
-, mWorld()
-, mSelectedBlock(1)
-, mGameTime(0.0f)
-, mAmbientLight(sf::Color::White)
-, mMiningPos(0, 0)
-, mMiningTimer(0.0f)
-, mCurrentHardness(0.0f)
+    : mWindow(sf::VideoMode(1920, 1080), "TerraForge C++")
+    , mPlayer()
+    , mWorld()
+    , mSelectedBlock(1)
+    , mGameTime(0.0f)
+    , mAmbientLight(sf::Color::White)
+    , mMiningPos(0, 0)
+    , mMiningTimer(0.0f)
+    , mCurrentHardness(0.0f)
+    , mSoundTimer(0.0f) // Inicializamos el temporizador
 {
     mWindow.setFramerateLimit(120);
+
+    // --- CARGAR SONIDOS ---
+    // 1. HIT (Golpe)
+    if (mBufHit.loadFromFile("assets/Hit.wav")) {
+        mSndHit.setBuffer(mBufHit);
+        mSndHit.setVolume(50.0f); // Volumen al 50%
+        // Variación de tono aleatoria para que no suene robótico
+        mSndHit.setPitch(1.0f);
+    }
+
+    // 2. BREAK (Rotura)
+    if (mBufBreak.loadFromFile("assets/Break.wav")) {
+        mSndBreak.setBuffer(mBufBreak);
+        mSndBreak.setVolume(70.0f);
+    }
+
+    // 3. BUILD (Construir)
+    if (mBufBuild.loadFromFile("assets/Build.wav")) {
+        mSndBuild.setBuffer(mBufBuild);
+        mSndBuild.setVolume(60.0f);
+    }
 
     if (!mSkyTexture.loadFromFile("assets/Sky.png")) {
         // Error handling
@@ -47,6 +69,10 @@ Game::Game()
     mInventory[9] = 0;
     mInventory[10] = 0;
     mInventory[11] = 0;
+
+    if (!mDodoTexture.loadFromFile("assets/Dodo.png")) {
+        std::cerr << "Error: Faltan los Dodos" << std::endl;
+    }
 }
 
 Game::~Game() {
@@ -107,8 +133,7 @@ float getBlockHardness(int id) {
 void Game::update(sf::Time dt) {
     mPlayer.update(dt, mWorld);
 
-    // --- NEW: UPDATE WORLD ITEMS ---
-    // We pass the player center to see if they pick something up
+    // --- UPDATE WORLD ITEMS ---
     mWorld.update(dt, mPlayer.getCenter(), mInventory);
 
     // Selection keys
@@ -118,12 +143,12 @@ void Game::update(sf::Time dt) {
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Num4)) mSelectedBlock = 4;
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Num5)) mSelectedBlock = 5;
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Num6)) mSelectedBlock = 6;
+
     // Teclas para herramientas
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Num7)) mSelectedBlock = 21; // Madera
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Num8)) mSelectedBlock = 22; // Piedra
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Num9)) mSelectedBlock = 23; // Hierro
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::Num0)) mSelectedBlock = 24; // Tungsteno
-
 
     // CAMERA
     sf::View view = mWindow.getDefaultView();
@@ -131,8 +156,23 @@ void Game::update(sf::Time dt) {
     view.setCenter(mPlayer.getPosition());
     mWindow.setView(view);
 
-    // --- RANGE AND MINING LOGIC ---
+    // --- INVOCAR DODOS (BLINDADO) ---
+    if (sf::Keyboard::isKeyPressed(sf::Keyboard::O)) {
+        // Le pedimos la posición explícitamente a la vista actual
+        sf::Vector2i mousePos = sf::Mouse::getPosition(mWindow);
+        sf::Vector2f worldPos = mWindow.mapPixelToCoords(mousePos, mWindow.getView());
 
+        int gX = static_cast<int>(std::floor(worldPos.x / mWorld.getTileSize()));
+        int gY = static_cast<int>(std::floor(worldPos.y / mWorld.getTileSize()));
+
+        // Si apuntamos al aire, nace el Dodo
+        if (mWorld.getBlock(gX, gY) == 0) {
+            mDodos.push_back(Dodo(worldPos, mDodoTexture));
+            sf::sleep(sf::milliseconds(200));
+        }
+    }
+
+    // --- RANGE AND INTERACTION LOGIC ---
     sf::Vector2i pixelPos = sf::Mouse::getPosition(mWindow);
     sf::Vector2f worldPos = mWindow.mapPixelToCoords(pixelPos);
     float tileSize = mWorld.getTileSize();
@@ -141,147 +181,196 @@ void Game::update(sf::Time dt) {
     int gridX = static_cast<int>(std::floor(worldPos.x / tileSize));
     int gridY = static_cast<int>(std::floor(worldPos.y / tileSize));
 
-    // 2. CALCULATE DISTANCE TO THE CENTER OF THAT BLOCK (NOT TO THE MOUSE)
-    // Center coordinate of the target block
+
+
+    // 2. CALCULATE DISTANCE TO THE CENTER OF THAT BLOCK
     float blockCenterX = (gridX * tileSize) + (tileSize / 2.0f);
     float blockCenterY = (gridY * tileSize) + (tileSize / 2.0f);
-
-    sf::Vector2f playerCenter = mPlayer.getPosition(); // It is already the center thanks to setOrigin
+    sf::Vector2f playerCenter = mPlayer.getPosition();
 
     float dx = blockCenterX - playerCenter.x;
     float dy = blockCenterY - playerCenter.y;
     float distance = std::sqrt(dx*dx + dy*dy);
-
     float maxRange = 180.0f;
 
-    // We only allow interaction if the BLOCK is close
-    if (distance <= maxRange) {
+    // --------------------------------------------------
+    // LEFT CLICK: COMBAT AND MINING
+    // --------------------------------------------------
+    if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
 
-        // Si NO estamos pulsando clic izquierdo, reseteamos el progreso
-        if (!sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
-            mMiningTimer = 0.0f;
-            mMiningPos = sf::Vector2i(-1, -1); // Posición inválida
+        // 1. Calcular Daño de Herramienta
+        int toolDamage = 1; // Puños
+        if (mSelectedBlock == 21) toolDamage = 3;
+        if (mSelectedBlock == 22) toolDamage = 5;
+        if (mSelectedBlock == 23) toolDamage = 10;
+        if (mSelectedBlock == 24) toolDamage = 20;
+
+        bool hitEntity = false;
+
+        // 2. Comprobar Combate con Dodos
+        for (auto& dodo : mDodos) {
+            // Si hacemos clic en su hitbox y estamos cerca
+            if (dodo.getBounds().contains(worldPos) && distance <= maxRange) {
+                float dir = (dodo.getPosition().x > playerCenter.x) ? 1.0f : -1.0f;
+
+                if (dodo.takeDamage(toolDamage, dir)) {
+                    mSndHit.setPitch(1.2f); // Tono agudo para golpe de carne
+                    mSndHit.play();
+                }
+                hitEntity = true;
+                break; // Solo pegamos a 1 Dodo por clic
+            }
         }
-        else if (distance <= maxRange) {
-            // Estamos pulsando clic izquierdo y estamos en rango
 
-            // 1. ¿Hemos cambiado de bloque?
-            // Si movemos el ratón a otro bloque, reiniciamos el contador
+        // 3. Si no le dimos a un Dodo, Minamos el bloque
+        if (!hitEntity && distance <= maxRange) {
+
+            // ¿Hemos cambiado de bloque?
             if (mMiningPos.x != gridX || mMiningPos.y != gridY) {
                 mMiningTimer = 0.0f;
                 mMiningPos = sf::Vector2i(gridX, gridY);
 
-                // Obtenemos la dureza del nuevo bloque
                 int blockID = mWorld.getBlock(gridX, gridY);
                 mCurrentHardness = getBlockHardness(blockID);
             }
 
-            // 2. Minar (Solo si es un bloque válido y no es aire)
+            // Minar
             if (mCurrentHardness > 0.0f) {
-                // 1. CALCULAR VELOCIDAD DE LA HERRAMIENTA
-                float miningSpeed = 1.0f; // Velocidad base (Mano)
+                float miningSpeed = 1.0f;
 
-                if (mSelectedBlock == 21) miningSpeed = 3.0f;  // Pico Madera (3x más rápido)
-                if (mSelectedBlock == 22) miningSpeed = 5.0f;  // Pico Piedra
-                if (mSelectedBlock == 23) miningSpeed = 10.0f; // Pico Hierro
-                if (mSelectedBlock == 24) miningSpeed = 20.0f; // Pico Tungsteno (Insta-mine)
+                if (mSelectedBlock == 21) miningSpeed = 3.0f;
+                if (mSelectedBlock == 22) miningSpeed = 5.0f;
+                if (mSelectedBlock == 23) miningSpeed = 10.0f;
+                if (mSelectedBlock == 24) miningSpeed = 20.0f;
 
-                /// --- NUEVO: RESTRICCIÓN DE MATERIALES ---
                 int targetID = mWorld.getBlock(gridX, gridY);
-
-                // Definimos qué es "Duro" (Piedra y todos los Minerales del 7 al 11)
                 bool isHardBlock = (targetID == 3 || (targetID >= 7 && targetID <= 11));
-
-                // Definimos si tenemos un Pico en la mano
                 bool holdingPickaxe = (mSelectedBlock >= 21 && mSelectedBlock <= 24);
 
-                // REGLA: Si es duro y NO tienes pico, velocidad es 0.
                 if (isHardBlock && !holdingPickaxe) {
                     miningSpeed = 0.0f;
-                    // Aquí podrías poner un sonido de "Clunk" (error) más adelante
                 }
 
-                // 2. APLICAR TIEMPO CON MULTIPLICADOR
                 mMiningTimer += dt.asSeconds() * miningSpeed;
 
-                // 3. ¿Hemos terminado? (IGUAL QUE ANTES)
                 if (mMiningTimer >= mCurrentHardness) {
-                    // ... (Romper bloque, igual que tenías) ...
                     mWorld.setBlock(gridX, gridY, 0);
 
-                    // IMPORTANTE: REINICIAR
+                    mSndBreak.setPitch(0.8f + (rand() % 40) / 100.0f);
+                    mSndBreak.play();
+
                     mMiningTimer = 0.0f;
                     mCurrentHardness = 0.0f;
                 }
+                else {
+                    mSoundTimer += dt.asSeconds();
+                    if (mSoundTimer >= 0.25f && miningSpeed > 0.0f) {
+                        mSndHit.setPitch(0.9f + (rand() % 20) / 100.0f);
+                        mSndHit.play();
+                        mSoundTimer = 0.0f;
+                    }
+                }
             }
             else if (mCurrentHardness == -1.0f) {
-                // Es Bedrock, no hacemos nada (quizás un sonido de 'ding' metálico)
                 mMiningTimer = 0.0f;
             }
         }
+    }
+    else {
+        // Soltamos clic izquierdo: Resetear minería
+        mMiningTimer = 0.0f;
+        mMiningPos = sf::Vector2i(-1, -1);
+    }
 
-        // Right Click (Place)
-        if (sf::Mouse::isButtonPressed(sf::Mouse::Right)) {
+    /// --------------------------------------------------
+    // RIGHT CLICK: PLACE BLOCKS OR EAT!
+    // --------------------------------------------------
+    if (sf::Mouse::isButtonPressed(sf::Mouse::Right)) {
+
+        // --- 1. ¿ES COMIDA? (ID 30 = Carne) ---
+        if (mSelectedBlock == 30) {
+            // Comprobamos si tenemos carne y si nos falta vida
+            if (mInventory[30] > 0 && mPlayer.getHp() < mPlayer.getMaxHp()) {
+                mInventory[30]--;         // Gastamos 1 carne
+                mPlayer.heal(20);         // Curamos 20 de vida
+
+                // Sonido de comer (reusamos un sonido bajándole el tono para que suene a "Ñam")
+                mSndBuild.setPitch(0.5f);
+                mSndBuild.play();
+
+                std::cout << "¡Ñam! Vida actual: " << mPlayer.getHp() << std::endl;
+                sf::sleep(sf::milliseconds(250)); // Pausa para no comernos 10 de golpe
+            }
+        }
+        // --- 2. SI NO ES COMIDA, CONSTRUIMOS UN BLOQUE ---
+        else if (distance <= maxRange) {
             if (mWorld.getBlock(gridX, gridY) == 0) {
                 sf::FloatRect blockRect(gridX * tileSize, gridY * tileSize, tileSize, tileSize);
 
                 if (!mPlayer.getGlobalBounds().intersects(blockRect)) {
-
-                    // --- NEW: CHECK IF YOU HAVE MATERIAL ---
                     if (mInventory[mSelectedBlock] > 0) {
-
                         mWorld.setBlock(gridX, gridY, mSelectedBlock);
-
-                        // SPEND 1 BLOCK
                         mInventory[mSelectedBlock]--;
+
+                        mSndBuild.setPitch(1.0f + (rand() % 20) / 100.0f);
+                        mSndBuild.play();
+
+                        // Pequeña pausa al construir también va bien
+                        sf::sleep(sf::milliseconds(150));
                     }
                 }
             }
         }
     }
+
     // --------------------------------------------------
     // DAY / NIGHT CYCLE LOGIC
     // --------------------------------------------------
-    // Advance time. (Multiply by 0.5f to make the day last longer)
     mGameTime += dt.asSeconds() * 0.5f;
-
-    // We use SINE to make a smooth wave between -1 and 1
-    // A full day is 2*PI radians.
     float cycle = std::sin(mGameTime);
-
-    // Convert range from (-1 to 1) -> (0.2 to 1.0)
-    // 1.0 = Noon (Full brightness)
-    // 0.2 = Midnight (Darkness, but not total so we can see something)
     float brightness = (cycle * 0.4f) + 0.6f;
 
-    // Calculate RGB color components
     sf::Uint8 r = static_cast<sf::Uint8>(255 * brightness);
     sf::Uint8 g = static_cast<sf::Uint8>(255 * brightness);
     sf::Uint8 b = static_cast<sf::Uint8>(255 * brightness);
 
-    // TRICK: At night (low brightness), we make the light slightly BLUISH
-    // to give a moonlight sensation.
     if (brightness < 0.5f) {
         b = static_cast<sf::Uint8>(std::min(255, b + 40));
     }
-
     mAmbientLight = sf::Color(r, g, b);
 
     // --------------------------------------------------
     // SISTEMA DE GUARDADO (F5 / F6)
     // --------------------------------------------------
-
-    // F5: GUARDAR
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::F5)) {
         saveGame();
-        // Pequeña pausa para no guardar 60 veces por segundo
         sf::sleep(sf::milliseconds(300));
     }
 
-    // F6: CARGAR
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::F6)) {
         loadGame();
         sf::sleep(sf::milliseconds(300));
+    }
+
+    // --------------------------------------------------
+    // ACTUALIZAR DODOS Y ELIMINAR CADÁVERES
+    // --------------------------------------------------
+    for (auto it = mDodos.begin(); it != mDodos.end(); ) {
+        it->update(dt, mPlayer.getPosition(), mWorld);
+
+        if (it->isDead()) {
+            // Soltar carne (ID 30)
+            mWorld.spawnItem(30, it->getPosition());
+
+            // Sonido al morir
+            mSndBreak.setPitch(1.5f);
+            mSndBreak.play();
+
+            // Borrar de la lista
+            it = mDodos.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
@@ -299,6 +388,9 @@ void Game::render() {
     // Aquí la cámara está enfocando al mundo correctamente
     mWorld.render(mWindow, mAmbientLight);
     mPlayer.render(mWindow, mAmbientLight);
+    for (auto& dodo : mDodos) {
+        dodo.render(mWindow, mAmbientLight);
+    }
 
     // --------------------------------------------------
     // DRAW MOUSE SELECTOR
@@ -441,6 +533,40 @@ void Game::render() {
         keyText.setPosition(slot.getPosition().x + 3.0f, slot.getPosition().y + 1.0f);
         mWindow.draw(keyText);
     }
+
+    // --------------------------------------------------
+    // DIBUJAR BARRA DE VIDA (HUD)
+    // --------------------------------------------------
+    // Calculamos el porcentaje de vida (0.0 a 1.0)
+    float hpPercent = static_cast<float>(mPlayer.getHp()) / mPlayer.getMaxHp();
+
+    // Posición: Debajo del inventario (X: 20, Y: 80)
+    float barX = 20.0f;
+    float barY = 80.0f;
+    float barWidth = 200.0f;
+    float barHeight = 20.0f;
+
+    // 1. Fondo (Rojo oscuro)
+    sf::RectangleShape hpBg(sf::Vector2f(barWidth, barHeight));
+    hpBg.setPosition(barX, barY);
+    hpBg.setFillColor(sf::Color(100, 0, 0, 200));
+    hpBg.setOutlineThickness(2.0f);
+    hpBg.setOutlineColor(sf::Color::Black);
+    mWindow.draw(hpBg);
+
+    // 2. Relleno de la barra (Rojo brillante o Verde)
+    sf::RectangleShape hpFill(sf::Vector2f(barWidth * hpPercent, barHeight));
+    hpFill.setPosition(barX, barY);
+    hpFill.setFillColor(sf::Color(255, 50, 50, 255)); // Rojo brillante
+    mWindow.draw(hpFill);
+
+    // 3. (Opcional) Texto de Vida "50/100"
+    sf::Text hpText = mUiText; // Copiamos la fuente
+    hpText.setString(std::to_string(mPlayer.getHp()) + " / " + std::to_string(mPlayer.getMaxHp()));
+    hpText.setCharacterSize(14);
+    hpText.setPosition(barX + barWidth / 2.0f - 25.0f, barY); // Centrado a ojo
+    mWindow.draw(hpText);
+
 
     // --------------------------------------------------
     // CRAFTING SYSTEM (Teclas F1 - F4)

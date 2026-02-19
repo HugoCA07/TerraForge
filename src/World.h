@@ -38,6 +38,7 @@ public:
     // Reciben el archivo abierto desde Game.cpp para escribir/leer sus datos
     void saveToStream(std::ofstream& file);
     void loadFromStream(std::ifstream& file);
+    void spawnItem(int id, sf::Vector2f pos);
 
 private:
     // --- GENERATION HELPERS ---

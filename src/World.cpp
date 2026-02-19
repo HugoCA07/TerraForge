@@ -345,20 +345,23 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
     // -----------------------------------------------------------
     // LOOP 3: ITEMS
     // -----------------------------------------------------------
+    // --- DIBUJAR ITEMS EN EL SUELO ---
     for (const auto& item : mItems) {
-        if (mTextures.count(item.id)) {
-             sprite.setTexture(mTextures[item.id]);
-             sprite.setOrigin(sprite.getLocalBounds().width/2, sprite.getLocalBounds().height/2);
-             sprite.setPosition(item.pos);
-             float scale = (mTileSize / sprite.getLocalBounds().width) * 0.4f;
-             sprite.setScale(scale, scale);
+        const sf::Texture* tex = getTexture(item.id);
+        if (tex) {
+            sf::Sprite sprite(*tex);
+            sprite.setPosition(item.pos);
 
-             sprite.setColor(calculateLight(item.pos, ambientColor));
+            // Ponemos el origen en el centro para que rote bonito
+            sprite.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
 
-             window.draw(sprite);
+            // El resto de bloques (tierra, madera, etc) a 0.5
+            sprite.setScale(0.5f, 0.5f);
+
+            sprite.setColor(calculateLight(item.pos, ambientColor));
+            window.draw(sprite);
         }
     }
-    sprite.setOrigin(0,0);
 }
 
 void World::spawnItem(int x, int y, int id) {
@@ -437,6 +440,9 @@ void World::loadTextures() {
     load(22, "assets/PickaxeStone.png");
     load(23, "assets/PickaxeIron.png");
     load(24, "assets/Pickaxetungsten.png");
+
+    // --- CARNE ---
+    load(30, "assets/Meat.png");
 }
 
 const sf::Texture* World::getTexture(int id) const {
@@ -575,4 +581,16 @@ void World::loadFromStream(std::ifstream& file) {
         mChunks[chunkX] = blocks;
         mBackgroundChunks[chunkX] = walls;
     }
+}
+
+void World::spawnItem(int id, sf::Vector2f pos) {
+    ItemDrop item;
+    item.id = id;
+    item.pos = pos;
+
+    // Le damos un pequeño "salto" hacia arriba para que el drop sea satisfactorio
+    item.vel = sf::Vector2f((rand() % 100 - 50), -150.0f);
+    item.timeAlive = 0.0f;
+
+    mItems.push_back(item);
 }

@@ -25,13 +25,21 @@ add_executable(TerraForge
         src/Player.h
         src/World.cpp
         src/World.h
+        src/Dodo.h
+        src/Dodo.cpp
 )
 
 # --- Linking ---
 target_link_libraries(TerraForge PRIVATE sfml-graphics sfml-window sfml-system sfml-audio sfml-main)
-
 # --- Assets Copy ---
 add_custom_command(TARGET TerraForge POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:TerraForge>/assets
+)
+
+# --- NUEVO: Copiar OpenAL automáticamente ---
+add_custom_command(TARGET TerraForge POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${sfml_SOURCE_DIR}/extlibs/bin/x64/openal32.dll
+        $<TARGET_FILE_DIR:TerraForge>/openal32.dll
 )

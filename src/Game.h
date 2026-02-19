@@ -1,8 +1,10 @@
 #pragma once
 
 #include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
 #include "Player.h"
 #include "World.h"
+#include "Dodo.h"
 #include <fstream>
 
 class Game {
@@ -51,4 +53,16 @@ private:
     sf::Vector2i mMiningPos;   // Coordenadas (X, Y) del bloque que estamos picando
     float mMiningTimer;        // Cuánto tiempo llevamos pulsando
     float mCurrentHardness;    // Cuánto tiempo necesita ese bloque para romperse
+    sf::SoundBuffer mBufHit;
+    sf::SoundBuffer mBufBreak;
+    sf::SoundBuffer mBufBuild;
+
+    sf::Sound mSndHit;
+    sf::Sound mSndBreak;
+    sf::Sound mSndBuild;
+
+    sf::Texture mDodoTexture;
+    std::vector<Dodo> mDodos;
+
+    float mSoundTimer;
     };

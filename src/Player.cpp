@@ -3,11 +3,13 @@
 #include <cmath>
 
 Player::Player()
-: mVelocity(0.f, 0.f)
-, mIsGrounded(false)
-, mAnimTimer(0.f)
-, mCurrentFrame(0)
-, mNumFrames(4) // <--- ASSUMING YOU HAVE 4 FRAMES IN YOUR IMAGE
+    : mVelocity(0.f, 0.f)
+    , mIsGrounded(false)
+    , mAnimTimer(0.f)
+    , mCurrentFrame(0)
+    , mNumFrames(4) // <--- ASSUMING YOU HAVE 4 FRAMES IN YOUR IMAGE
+    , mMaxHp(100)
+    , mHp(50)
 {
     // 1. Load Texture
     if (!mTexture.loadFromFile("assets/player.png")) {
@@ -251,4 +253,11 @@ sf::Vector2f Player::getCenter() const {
 
 void Player::setPosition(sf::Vector2f pos) {
     mSprite.setPosition(pos);
+}
+
+void Player::heal(int amount) {
+    mHp += amount;
+    if (mHp > mMaxHp) {
+        mHp = mMaxHp; // Nunca tener más del máximo
+    }
 }

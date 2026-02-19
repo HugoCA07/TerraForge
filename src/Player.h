@@ -19,10 +19,16 @@ public:
     sf::Vector2f getCenter() const;
     sf::FloatRect getGlobalBounds() const { return mSprite.getGlobalBounds(); }
     void setPosition(sf::Vector2f pos);
+    int getHp() const { return mHp; }
+    int getMaxHp() const { return mMaxHp; }
+    void heal(int amount);
 
 private:
     sf::Texture mTexture;
     sf::Sprite mSprite;
+
+    int mHp;
+    int mMaxHp;
 
     // --- PHYSICS VARIABLES ---
     sf::Vector2f mVelocity; // Current speed in X and Y directions
