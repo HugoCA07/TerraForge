@@ -34,11 +34,18 @@ public:
 
     // Move and get items
     void update(sf::Time dt, sf::Vector2f playerPos, std::map<int, int>& inventory);
-    // --- NUEVO: GUARDADO Y CARGA ---
-    // Reciben el archivo abierto desde Game.cpp para escribir/leer sus datos
+    // --- NEW: SAVE AND LOAD ---
+    // Receive the open file from Game.cpp to write/read its data
     void saveToStream(std::ofstream& file);
     void loadFromStream(std::ifstream& file);
     void spawnItem(int id, sf::Vector2f pos);
+
+    // --- NEW: COLLISION HELPER ---
+    // Returns true if the block ID is solid (collidable)
+    static bool isSolid(int blockID) {
+        // 0 = Air, 4 = Wood (Passable), 5 = Leaves (Passable), 6 = Torch, 25 = Door
+        return (blockID != 0 && blockID != 4 && blockID != 5 && blockID != 6 && blockID != 25);
+    }
 
 private:
     // --- GENERATION HELPERS ---

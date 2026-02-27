@@ -1,49 +1,59 @@
-#include "Dodo.h"
+#include "Troodon.h"
 #include <cmath>
 
-// Call the parent constructor (Mob) passing the Dodo's health (20)
-Dodo::Dodo(sf::Vector2f startPos, const sf::Texture& texture)
-    : Mob(startPos, texture, 20)
+// The Troodon has 40 health points
+Troodon::Troodon(sf::Vector2f startPos, const sf::Texture& texture)
+    : Mob(startPos, texture, 40)
 {
-    mAttackDamage = 25; // <--- ADD THIS!
-    // No need to configure the sprite here anymore, the parent does it
+    mAttackDamage = 40; // <--- ADD THIS!
 }
 
 /**
- * Updates the Dodo's state.
- * Handles AI behavior (chasing the player), movement, gravity, and collisions.
+ * Updates the Troodon's state.
+ * Handles AI behavior (hunting at night, fleeing during the day), movement, gravity, and collisions.
  * @param dt Delta time (time elapsed since last frame).
  * @param playerPos The player's current position.
  * @param world Reference to the game world for collision detection.
  * @param lightLevel The current light level (affects behavior).
  */
-void Dodo::update(sf::Time dt, sf::Vector2f playerPos, World& world, float lightLevel) {
+void Troodon::update(sf::Time dt, sf::Vector2f playerPos, World& world, float lightLevel) {
+
     float tileSize = world.getTileSize();
 
     // 1. Damage timer
     if (mDamageTimer > 0.0f) mDamageTimer -= dt.asSeconds();
 
     // -----------------------------------------------------
-    // 1. AI (DODO BRAIN) - NOW GOES FIRST
+    // 1. AI (TROODON BRAIN) - DAY AND NIGHT!
     // -----------------------------------------------------
     float distX = playerPos.x - mPos.x;
     float distY = playerPos.y - mPos.y;
     float distTotal = std::sqrt(distX*distX + distY*distY);
 
-    // Since we haven't added gravity yet, mVel.y is still 0
-    // if the dodo hit the ground in the previous frame.
-    if (mVel.y == 0.0f) {
-        if (distTotal < 400.0f) {
-            // Go for the player!
+    if (mVel.y == 0.0f) { // If touching the ground
+
+        // IT'S NIGHT (Low light) -> Relentless hunt!
+        if (lightLevel < 0.6f && distTotal < 600.0f) {
             if (distX > 0) {
-                mVel.x = 100.0f;
+                mVel.x = 180.0f; // Runs towards you
                 mFacingRight = true;
             } else {
-                mVel.x = -100.0f;
+                mVel.x = -180.0f;
                 mFacingRight = false;
             }
-        } else {
-            // Stay still
+        }
+        // IT'S DAY (High light) -> Runs away terrified if you get close!
+        else if (lightLevel >= 0.6f && distTotal < 400.0f) {
+            if (distX > 0) {
+                mVel.x = -150.0f; // Runs in the opposite direction
+                mFacingRight = false;
+            } else {
+                mVel.x = 150.0f;
+                mFacingRight = true;
+            }
+        }
+        // If you are far away or nothing happens, it stays still
+        else {
             mVel.x *= 0.8f;
         }
     }
@@ -77,7 +87,7 @@ void Dodo::update(sf::Time dt, sf::Vector2f playerPos, World& world, float light
         mSprite.setPosition(mPos);
 
         if (mVel.y == 0.0f) {
-            mVel.y = -280.0f; // Jump the wall!
+            mVel.y = -350.0f; // Jump the wall!
         }
     }
 

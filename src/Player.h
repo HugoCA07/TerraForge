@@ -8,7 +8,7 @@ public:
     Player(); // Constructor
 
     // Main methods
-    void handleInput(); // Handles keyboard input for movement
+    void handleInput(bool isInventoryOpen = false); // Handles keyboard input for movement
 
     // Updates player physics and state, checking for collisions with the world
     void update(sf::Time dt, World& world);
@@ -17,11 +17,28 @@ public:
     // Position and bounds getters
     sf::Vector2f getPosition() const { return mSprite.getPosition(); }
     sf::Vector2f getCenter() const;
+    // --- NEW: TAKE DAMAGE ---
+    bool takeDamage(int amount, float knockbackDir);
     sf::FloatRect getGlobalBounds() const { return mSprite.getGlobalBounds(); }
     void setPosition(sf::Vector2f pos);
     int getHp() const { return mHp; }
     int getMaxHp() const { return mMaxHp; }
     void heal(int amount);
+    void setOverweight(bool isHeavy) { mIsOverweight = isHeavy; }
+    void setEquippedWeapon(int itemID) { mEquippedWeaponID = itemID; }
+    // --- COMBATE ---
+    sf::FloatRect getWeaponHitbox() const;
+    bool canDealDamage() const { return mCombatState == CombatState::Active && !mHasHitThisSwing; }
+    void registerHit() { mHasHitThisSwing = true; } // Llamaremos a esto cuando acertemos a un enemigo
+
+    // --- SISTEMA DE COMBATE SOULS-LIKE ---
+    enum class CombatState {
+        None,
+        Windup,
+        Active,
+        Recovery
+    };
+    CombatState getCombatState() const { return mCombatState; }
 
 private:
     sf::Texture mTexture;
@@ -29,10 +46,12 @@ private:
 
     int mHp;
     int mMaxHp;
+    float mDamageTimer; // Invulnerability timer
 
     // --- PHYSICS VARIABLES ---
     sf::Vector2f mVelocity; // Current speed in X and Y directions
     bool mIsGrounded;       // Is the player standing on a solid block?
+    bool mIsOverweight = false;
 
     float mAnimTimer;
     int mCurrentFrame;
@@ -41,7 +60,30 @@ private:
     int mFrameHeight;
 
     // --- CONSTANTS (Physics Rules) ---
-    const float MOVEMENT_SPEED = 300.0f; // Pixels per second horizontal
     const float GRAVITY = 980.0f;        // Downward force (pixels/s^2)
     const float JUMP_FORCE = -500.0f;    // Upward force (Negative Y goes UP)
+
+    // --- ANIMATION SYSTEM ---
+    enum class AnimState {
+        Idle,   // Standing still
+        Walk,   // Walking
+        Mine    // Mining (for the future)
+    };
+    AnimState mCurrentState = AnimState::Idle;
+    int mCurrentRow = 0; // The row of the image we are reading
+
+    // --- FLUID MOVEMENT ---
+    float mAcceleration = 2000.0f; // How fast it picks up speed
+    float mFriction = 1500.0f;     // How fast it brakes when releasing the key
+    float mMaxSpeed = 250.0f;      // Max speed when running
+    float mMoveDirection = 0.0f;   // -1 (Left), 1 (Right), 0 (Still)
+
+    CombatState mCombatState = CombatState::None;
+    float mCombatTimer = 0.0f;
+
+    // --- ARMA / COMBATE VISUAL ---
+    sf::Texture mWeaponTexture;
+    sf::Sprite mWeaponSprite;
+    int mEquippedWeaponID = 0; // Guardará el ID del arma que tenemos en la mano
+    bool mHasHitThisSwing = false; // El seguro para no dar 60 golpes por segundo
 };

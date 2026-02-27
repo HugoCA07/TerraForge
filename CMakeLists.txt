@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(BUILD_SHARED_LIBS OFF)
 
+set(CMAKE_EXE_LINKER_FLAGS "-static -static-libgcc -static-libstdc++")
+
 # --- SFML Download ---
 include(FetchContent)
 FetchContent_Declare(
@@ -27,6 +29,10 @@ add_executable(TerraForge
         src/World.h
         src/Dodo.h
         src/Dodo.cpp
+        src/Troodon.cpp
+        src/Troodon.h
+        src/Mob.cpp
+        src/Mob.h
 )
 
 # --- Linking ---
@@ -37,7 +43,7 @@ add_custom_command(TARGET TerraForge POST_BUILD
         ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:TerraForge>/assets
 )
 
-# --- NUEVO: Copiar OpenAL automáticamente ---
+# --- NEW: Copy OpenAL automatically ---
 add_custom_command(TARGET TerraForge POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${sfml_SOURCE_DIR}/extlibs/bin/x64/openal32.dll

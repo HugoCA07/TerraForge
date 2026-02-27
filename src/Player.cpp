@@ -2,143 +2,196 @@
 #include <iostream>
 #include <cmath>
 
+/**
+ * Constructor for the Player class.
+ * Initializes the player's attributes, loads the texture, and sets up the sprite.
+ */
 Player::Player()
     : mVelocity(0.f, 0.f)
     , mIsGrounded(false)
     , mAnimTimer(0.f)
     , mCurrentFrame(0)
-    , mNumFrames(4) // <--- ASSUMING YOU HAVE 4 FRAMES IN YOUR IMAGE
+    , mNumFrames(4)
     , mMaxHp(100)
     , mHp(50)
+    , mDamageTimer(0.0f)
 {
-    // 1. Load Texture
     if (!mTexture.loadFromFile("assets/player.png")) {
         std::cerr << "Error: Could not load player.png" << std::endl;
     }
-
-    // 2. Pixel Art
     mTexture.setSmooth(false);
     mSprite.setTexture(mTexture);
 
-    // 3. CALCULATE FRAME SIZE
-    // We divide the total width of the image by the number of frames
+    // Calculate exact size by dividing by rows and columns
+    int numRows = 4;
     mFrameWidth = mTexture.getSize().x / mNumFrames;
-    mFrameHeight = mTexture.getSize().y;
+    mFrameHeight = mTexture.getSize().y / numRows;
 
-    // 4. CROP THE FIRST FRAME (Idle)
-    // IntRect(x, y, width, height) defines which part of the image is visible.
     mSprite.setTextureRect(sf::IntRect(0, 0, mFrameWidth, mFrameHeight));
-
-    // 5. CENTER THE ORIGIN (Pivot)
-    // IMPORTANT: We use mFrameWidth, not the total width of the texture
     mSprite.setOrigin(mFrameWidth / 2.f, mFrameHeight / 2.f);
-
-    // 6. Scale and Position
-    // Since your sprite is 32px wide, you want it to measure 3 blocks (96px)...
-    // 32 * 3 = 96. Scale factor 3.0f?
-    // Adjust this to 1.25f or whatever worked for you before.
     mSprite.setScale(1.25f, 1.25f);
-
     mSprite.setPosition(100.f, 1000.f);
+    // --- CONFIGURACIÓN DEL ARMA ---
+    if (!mWeaponTexture.loadFromFile("assets/PickaxeWoodHands.png")) {
+        std::cerr << "Error: No se encontro PickaxeWoodHands.png" << std::endl;
+    }
+    mWeaponTexture.setSmooth(false); // <--- Vital para pixel art
+    mWeaponSprite.setTexture(mWeaponTexture);
+
+    // Ponemos el pivote abajo del todo y en el centro (justo por donde se agarra el palo)
+    mWeaponSprite.setOrigin(mWeaponTexture.getSize().x / 2.0f, mWeaponTexture.getSize().y);
+
+    // Le damos la misma escala que tiene tu personaje (1.25f)
+    mWeaponSprite.setScale(1.25f, 1.25f);
 }
 
-void Player::handleInput() {
-    // Reset horizontal velocity every frame (no inertia yet)
-    mVelocity.x = 0.f;
+/**
+ * Handles player input (keyboard).
+ * Updates velocity based on key presses (A, D, Space).
+ */
+void Player::handleInput(bool isInventoryOpen) { // <--- ADD PARAMETER HERE
+    mMoveDirection = 0.0f; // By default we don't move
 
-    // --- LEFT MOVEMENT ---
-    if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) {
-        mVelocity.x = -MOVEMENT_SPEED;
+    // We can only move, jump or attack if we are NOT in the middle of a hit
+    if (mCombatState == CombatState::None) {
 
-        // Flip Sprite: Negative X scale makes it face Left.
-        // We use a positive Y scale to keep it upright.
-        mSprite.setScale(1.25f, 1.25f);
-    }
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) {
+            mMoveDirection = -1.0f;
+        }
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) {
+            mMoveDirection = 1.0f;
+        }
 
-    // --- RIGHT MOVEMENT ---
-    if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) {
-        mVelocity.x = MOVEMENT_SPEED;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Space) && mIsGrounded) {
+            float jumpPower = mIsOverweight ? -350.0f : -500.0f;
+            mVelocity.y = jumpPower;
+            mIsGrounded = false;
+        }
 
-        // Normal Sprite: Positive X scale makes it face Right.
-        mSprite.setScale(-1.25f, 1.25f);
-    }
-
-    // --- JUMPING ---
-    if (sf::Keyboard::isKeyPressed(sf::Keyboard::Space) && mIsGrounded) {
-        mVelocity.y = JUMP_FORCE; // Apply upward force
-        mIsGrounded = false;      // We are now airborne
+        // START ATTACK (Left Click)
+        // --- NEW! We only attack if the inventory is CLOSED ---
+        if (!isInventoryOpen && sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+            mCombatState = CombatState::Windup;
+            mCombatTimer = 0.0f;
+            mVelocity.x = 0.0f; // Stop dead when starting to attack
+            std::cout << "[COMBAT] Preparing strike..." << std::endl;
+        }
     }
 }
 
-
+/**
+ * Updates the player's state.
+ * Handles movement, physics (gravity), collisions, and animation.
+ * @param dt Delta time (time elapsed since last frame).
+ * @param world Reference to the game world for collision detection.
+ */
 void Player::update(sf::Time dt, World& world) {
     float tileSize = world.getTileSize();
-    // Note: Input is now handled in handleInput() and called from Game::processEvents()
-    // This keeps input polling separate from physics updates.
-
-    // Store original position for collision response
     sf::Vector2f originalPos = mSprite.getPosition();
     sf::FloatRect bounds = mSprite.getGlobalBounds();
 
-    // Create a slightly smaller hitbox ("skin") to avoid getting stuck on tile edges.
     float skinW = 4.0f;
     float skinH = 0.5f;
-    // ---------------------------------------------------------
-    // ANIMATION SYSTEM
-    // ---------------------------------------------------------
 
-    // 1. Are we moving horizontally?
-    if (std::abs(mVelocity.x) > 10.0f) { // We use a small threshold
+    // ==========================================
+    // 1. THINK: COMBAT STATE MACHINE
+    // ==========================================
+    if (mCombatState != CombatState::None) {
+        mCombatTimer += dt.asSeconds();
 
-        // Add time
-        mAnimTimer += dt.asSeconds();
-
-        // Every 0.15 seconds, we change the frame
-        float timePerFrame = 0.15f;
-
-        if (mAnimTimer >= timePerFrame) {
-            mAnimTimer = 0;
-            mCurrentFrame++;
-
-            // If we reach the end, go back to the beginning (Loop)
-            if (mCurrentFrame >= mNumFrames) {
-                mCurrentFrame = 0;
+        if (mCombatState == CombatState::Windup) {
+            // Fase 1: Levantando el arma (0.2 segundos)
+            if (mCombatTimer >= 0.2f) {
+                mCombatState = CombatState::Active;
+                mCombatTimer = 0.0f;
+                mHasHitThisSwing = false; // <--- ¡NUEVO! Quitamos el seguro al lanzar el golpe
+                std::cout << "[COMBATE] !ZAS! Golpe activo." << std::endl;
             }
         }
+        else if (mCombatState == CombatState::Active) {
+            if (mCombatTimer >= 0.1f) {
+                mCombatState = CombatState::Recovery;
+                mCombatTimer = 0.0f;
+                std::cout << "[COMBAT] Recovering balance..." << std::endl;
+            }
+        }
+        else if (mCombatState == CombatState::Recovery) {
+            if (mCombatTimer >= 0.3f) {
+                mCombatState = CombatState::None;
+                mCombatTimer = 0.0f;
+                std::cout << "[COMBAT] Ready for another action." << std::endl;
+            }
+        }
+    }
+
+    // ==========================================
+    // 1.5 VISUALES DEL ARMA (COREOGRAFÍA Y REPOSO)
+    // ==========================================
+    bool isHoldingPickaxe = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24);
+    if (isHoldingPickaxe) {
+        float facingDir = (mSprite.getScale().x > 0) ? 1.0f : -1.0f;
+
+        // Los mismos ajustes que pusimos antes para que salga del puño
+        float handOffsetX = 25.0f * facingDir;
+        float handOffsetY = 15.0f;
+
+        // 1. SIEMPRE lo pegamos a la mano y lo volteamos
+        mWeaponSprite.setPosition(mSprite.getPosition().x + handOffsetX, mSprite.getPosition().y + handOffsetY);
+        mWeaponSprite.setScale(1.25f * facingDir, 1.25f);
+
+        // 2. DECIDIMOS LA ROTACIÓN
+        if (mCombatState != CombatState::None) {
+            // --- ESTAMOS ATACANDO (Coreografía) ---
+            if (mCombatState == CombatState::Windup) {
+                float progress = mCombatTimer / 0.2f;
+                mWeaponSprite.setRotation(-60.0f * progress * facingDir);
+            }
+            else if (mCombatState == CombatState::Active) {
+                float progress = mCombatTimer / 0.1f;
+                mWeaponSprite.setRotation((-60.0f + (150.0f * progress)) * facingDir);
+            }
+            else if (mCombatState == CombatState::Recovery) {
+                mWeaponSprite.setRotation(90.0f * facingDir);
+            }
+        }
+        else {
+            // --- ESTAMOS EN REPOSO / CAMINANDO ---
+            // Le damos una pequeña inclinación hacia atrás/arriba para que parezca que
+            // lo lleva apoyado al hombro o listo para usarse.
+            // ¡Prueba a cambiar este -20.0f si lo quieres más recto o más caído!
+            mWeaponSprite.setRotation(1.0f * facingDir);
+        }
+    }
+
+    // ==========================================
+    // 2. THINK: FLUID MOVEMENT (INERTIA AND FRICTION)
+    // ==========================================
+    float maxSpd = mIsOverweight ? 60.0f : mMaxSpeed;
+
+    if (mMoveDirection != 0.0f) {
+        // Accelerate towards the pressed direction
+        mVelocity.x += mMoveDirection * mAcceleration * dt.asSeconds();
+        // Limit to max speed
+        if (mVelocity.x > maxSpd) mVelocity.x = maxSpd;
+        if (mVelocity.x < -maxSpd) mVelocity.x = -maxSpd;
     } else {
-        // If standing still, reset to frame 0 (Idle)
-        mCurrentFrame = 0;
-        mAnimTimer = 0;
+        // Friction: Slow down gradually when keys are released
+        if (mVelocity.x > 0.0f) {
+            mVelocity.x -= mFriction * dt.asSeconds();
+            if (mVelocity.x < 0.0f) mVelocity.x = 0.0f;
+        } else if (mVelocity.x < 0.0f) {
+            mVelocity.x += mFriction * dt.asSeconds();
+            if (mVelocity.x > 0.0f) mVelocity.x = 0.0f;
+        }
     }
 
-    // 2. APPLY THE CROP TO THE TEXTURE
-    // We move the "window" X pixels to the right according to the current frame
-    int textureX = mCurrentFrame * mFrameWidth;
-    mSprite.setTextureRect(sf::IntRect(textureX, 0, mFrameWidth, mFrameHeight));
+    // Gravity
+    mVelocity.y += GRAVITY * dt.asSeconds();
 
-
-    // ---------------------------------------------------------
-    // FLIP (TURN)
-    // ---------------------------------------------------------
-    // Make sure to keep your correct scale (1.25f in your case)
-    float scale = 1.25f;
-
-    if (mVelocity.x > 0) {
-        mSprite.setScale(scale, scale);
-    }
-    else if (mVelocity.x < 0) {
-        mSprite.setScale(-scale, scale);
-    }
-    
-    sf::FloatRect hitbox = bounds;
-    // Reduce hitbox size by the skin amount
-    hitbox.left += skinW;
-    hitbox.width -= (skinW * 2);
-    hitbox.top += skinH;
-    hitbox.height -= (skinH * 2);
-
+    // ==========================================
+    // 3. MOVE AND COLLIDE: COLLISION HELPER FUNCTION
+    // ==========================================
     auto checkCollision = [&](sf::FloatRect rect) -> bool {
-        // Coordinate mathematics (std::floor for negatives)
         int left   = static_cast<int>(std::floor(rect.left / tileSize));
         int right  = static_cast<int>(std::floor((rect.left + rect.width) / tileSize));
         int top    = static_cast<int>(std::floor(rect.top / tileSize));
@@ -146,80 +199,47 @@ void Player::update(sf::Time dt, World& world) {
 
         for (int x = left; x <= right; ++x) {
             for (int y = top; y <= bottom; ++y) {
-
                 int blockID = world.getBlock(x, y);
-
-                // --- MODIFIED COLLISION LOGIC ---
-                // Before: if (blockID != 0) return true;
-
-                // NOW: We only collide if it is NOT air (0) AND NOT vegetation (4, 5)
-                // That is: We only collide with Dirt (1), Grass (2), and Stone (3).
-
-                if (blockID != 0 && blockID != 4 && blockID != 5) {
-                    return true; // It's a solid block!
-                }
-
-                // If it is 4 (Wood) or 5 (Leaves), the loop continues and the function returns false.
-                // The player walks through it!
+                if (world.isSolid(blockID)) { return true; }
             }
         }
         return false;
     };
 
-    // ---------------------------------------------------------
-    // PHASE 1: HORIZONTAL MOVEMENT (X) + AUTO-CLIMB
-    // We process X and Y movement separately to handle collisions correctly.
-    // ---------------------------------------------------------
+    // --- X AXIS (Horizontal) ---
     float dx = mVelocity.x * dt.asSeconds();
     mSprite.move(dx, 0.f);
 
-    // Check for horizontal collision at the new position
-    sf::FloatRect nextHitbox = hitbox;
-    nextHitbox.left += dx;
-    if (checkCollision(nextHitbox)) {
+    sf::FloatRect hitboxX = mSprite.getGlobalBounds();
+    hitboxX.left += skinW; hitboxX.width -= (skinW * 2);
+    hitboxX.top += skinH; hitboxX.height -= (skinH * 2);
 
-        // --- AUTO-CLIMB LOGIC ---
-        // If we hit a wall, check if we can step up it.
+    if (checkCollision(hitboxX)) {
         float stepHeight = tileSize + 2.0f;
+        sf::FloatRect stepHitbox = hitboxX;
+        stepHitbox.top -= stepHeight;
 
-        sf::FloatRect stepHitbox = nextHitbox;
-        stepHitbox.top -= stepHeight; // Check one block higher
-
-        // If the space one block up is clear, move the player up.
         if (!checkCollision(stepHitbox)) {
-            mSprite.move(0.f, -stepHeight);
-        }
-        else {
-            mSprite.setPosition(originalPos.x, mSprite.getPosition().y);
+            mSprite.move(0.f, -stepHeight); // Auto-climb
+        } else {
+            mSprite.setPosition(originalPos.x, mSprite.getPosition().y); // Hit wall
+            mVelocity.x = 0.0f; // <--- IMPORTANT: Stop dead on impact
         }
     }
 
-    // ---------------------------------------------------------
-    // PHASE 2: VERTICAL MOVEMENT (Y)
-    // ---------------------------------------------------------
-    // Apply gravity to vertical velocity
-    mVelocity.y += GRAVITY * dt.asSeconds();
+    // --- Y AXIS (Vertical) ---
     float dy = mVelocity.y * dt.asSeconds();
     mSprite.move(0.f, dy);
 
-    // Update hitbox for Y-axis collision check
-    hitbox = mSprite.getGlobalBounds();
-    hitbox.left += skinW;
-    hitbox.width -= (skinW * 2);
+    sf::FloatRect hitboxY = mSprite.getGlobalBounds();
+    hitboxY.left += skinW; hitboxY.width -= (skinW * 2);
 
-    // Check for vertical collision
-    if (checkCollision(hitbox)) {
-        if (mVelocity.y > 0) { // Moving down (falling or walking down a slope)
-            float playerBottom = hitbox.top + hitbox.height;
-
-            // Find the Y coordinate of the block the player is colliding with.
-            // Using std::floor is crucial for correct collision detection.
+    if (checkCollision(hitboxY)) {
+        if (mVelocity.y > 0) { // Touching ground
+            float playerBottom = hitboxY.top + hitboxY.height;
             int blockY = static_cast<int>(std::floor(playerBottom / tileSize));
-
-            // Calculate the new Y position to place the player exactly on top of the block.
             float newY = (blockY * tileSize) - bounds.height;
 
-            // A small check to prevent snapping to a block far away
             if (std::abs(mSprite.getPosition().y - newY) < tileSize) {
                 mSprite.setPosition(mSprite.getPosition().x, newY);
             } else {
@@ -228,20 +248,101 @@ void Player::update(sf::Time dt, World& world) {
             mVelocity.y = 0;
             mIsGrounded = true;
         }
+        else if (mVelocity.y < 0) { // Hitting ceiling (Headbutt)
+            mSprite.move(0.f, -dy);
+            mVelocity.y = 0;
+        }
+    } else {
+        mIsGrounded = false; // We are in the air
     }
-    else {
-        // If there's no block below us, we are in the air.
-        mIsGrounded = false;
+
+    // ==========================================
+    // 4. ANIMATE AND DRAW
+    // ==========================================
+    // Damage
+    if (mDamageTimer > 0.0f) {
+        mDamageTimer -= dt.asSeconds();
+        mSprite.setColor(sf::Color(255, 100, 100));
+    } else {
+        mSprite.setColor(sf::Color::White);
+    }
+
+    // ==========================================
+    // DECIDIR ANIMACIÓN (Depende del movimiento y del arma)
+    // ==========================================
+    isHoldingPickaxe = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24);
+
+    if (std::abs(mVelocity.x) > 10.0f) {
+        mCurrentState = AnimState::Walk;
+        // Si tiene el pico, usa la fila 3 (Caminar con arma). Si no, la fila 1 (Caminar normal)
+        mCurrentRow = isHoldingPickaxe ? 3 : 1;
+    } else {
+        mCurrentState = AnimState::Idle;
+        // Si tiene el pico, usa la fila 2 (Quieto con arma). Si no, la fila 0 (Quieto normal)
+        mCurrentRow = isHoldingPickaxe ? 2 : 0;
+    }
+
+    // Player
+    mAnimTimer += dt.asSeconds();
+    float timePerFrame = (mCurrentState == AnimState::Walk) ? 0.1f : 0.25f;
+
+    if (mAnimTimer >= timePerFrame) {
+        mAnimTimer = 0.0f;
+        mCurrentFrame++;
+        if (mCurrentFrame >= mNumFrames) mCurrentFrame = 0;
+    }
+
+    mSprite.setTextureRect(sf::IntRect(
+        mCurrentFrame * mFrameWidth,
+        mCurrentRow * mFrameHeight,
+        mFrameWidth,
+        mFrameHeight
+    ));
+
+    // ---------------------------------------------------------
+    // FLIP (TURN) - ¡Corregido!
+    // ---------------------------------------------------------
+    float scale = 1.25f;
+
+    // Usamos mMoveDirection (la intención del teclado) en lugar de mVelocity (las físicas)
+    if (mMoveDirection > 0) {
+        mSprite.setScale(scale, scale);
+    }
+    else if (mMoveDirection < 0) {
+        mSprite.setScale(-scale, scale);
     }
 }
 
+/**
+ * Renders the player to the window.
+ * Applies the current light color to the player sprite.
+ * @param window The render window.
+ * @param lightColor The current light color (for day/night cycle).
+ */
 void Player::render(sf::RenderWindow& window, sf::Color lightColor) {
-    // Aplicamos el tinte de luz al personaje
+    // Dibujamos al jugador
     mSprite.setColor(lightColor);
-
     window.draw(mSprite);
+
+    // --- NUEVO: Dibujamos el arma SIEMPRE que la tengamos equipada ---
+    bool isHoldingPickaxe = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24);
+
+    if (isHoldingPickaxe) {
+        // Le aplicamos el color de la luz ambiental (+ un toque de brillo)
+        sf::Color weaponColor = lightColor;
+        weaponColor.r = std::min(255, weaponColor.r + 30);
+        weaponColor.g = std::min(255, weaponColor.g + 30);
+        weaponColor.b = std::min(255, weaponColor.b + 30);
+
+        mWeaponSprite.setColor(weaponColor);
+        window.draw(mWeaponSprite);
+    }
 }
 
+/**
+ * Gets the center position of the player.
+ * @return The center coordinates of the player sprite.
+ */
 sf::Vector2f Player::getCenter() const {
     // Calculate the absolute center of the sprite in the game world.
     sf::FloatRect bounds = mSprite.getGlobalBounds();
@@ -251,13 +352,84 @@ sf::Vector2f Player::getCenter() const {
     );
 }
 
+/**
+ * Sets the player's position.
+ * @param pos The new position.
+ */
 void Player::setPosition(sf::Vector2f pos) {
     mSprite.setPosition(pos);
 }
 
+/**
+ * Heals the player by a specified amount.
+ * Ensures health does not exceed the maximum.
+ * @param amount The amount of health to restore.
+ */
 void Player::heal(int amount) {
     mHp += amount;
     if (mHp > mMaxHp) {
-        mHp = mMaxHp; // Nunca tener más del máximo
+        mHp = mMaxHp; // Never have more than the maximum
     }
+}
+
+/**
+ * Applies damage to the player.
+ * Handles invulnerability frames and knockback.
+ * @param amount The amount of damage to take.
+ * @param knockbackDir The direction of the knockback (-1.0f for left, 1.0f for right).
+ * @return True if damage was taken, false if the player was invulnerable.
+ */
+bool Player::takeDamage(int amount, float knockbackDir) {
+    // If we are still invulnerable from the previous hit, ignore this one
+    if (mDamageTimer > 0.0f) return false;
+
+    mHp -= amount;
+    mDamageTimer = 1.0f; // 1 second of invulnerability after a hit
+
+    // Knockback to make the attack feel impactful
+    mVelocity.y = -250.0f;
+    mVelocity.x = knockbackDir * 300.0f;
+
+    // Limit minimum health to 0
+    if (mHp < 0) mHp = 0;
+
+    return true; // Hit received successfully
+}
+
+sf::FloatRect Player::getWeaponHitbox() const {
+    float facingDir = (mSprite.getScale().x > 0) ? 1.0f : -1.0f;
+
+    // ==========================================
+    // NUEVA CONFIGURACIÓN DE HITBOX (Como tu imagen)
+    // ==========================================
+
+    // ANCHO (Alcance hacia adelante):
+    // He puesto 75px. ¡Es bastante largo para que se parezca al alcance de minería!
+    // Tu personajeScaledWidth es ~20px, así que esto llega 3 veces más lejos.
+    float hitboxWidth = 75.0f;
+
+    // ALTO: 55px. Cubre desde el pecho hasta las rodillas.
+    float hitboxHeight = 55.0f;
+
+    sf::Vector2f playerPos = mSprite.getPosition(); // Recordamos: El origin es el CENTRO.
+
+    // --- CÁLCULO DE POSICIÓN X (Horizontal) ---
+    // Queremos que la caja empiece un poco *detrás* del puño extendido,
+    // en la zona del hombro/pecho, para que no falles a enemigos pegados a ti.
+    // Usamos un offset de 5px desde el centro.
+    float horizontalOffsetFromCenter = 5.0f * facingDir;
+
+    float xPos = 0.0f;
+    if (facingDir > 0) { // Mirando Derecha
+        xPos = playerPos.x + horizontalOffsetFromCenter;
+    } else { // Mirando Izquierda (Restamos el ancho para calcular la esquina izquierda)
+        xPos = playerPos.x + horizontalOffsetFromCenter - hitboxWidth;
+    }
+
+    // --- CÁLCULO DE POSICIÓN Y (Vertical) ---
+    // Recordamos: El origin es el WAIST (Cintura/Ombligo). En SFML la Y sube restando.
+    // Subimos la caja 25px para alinear la parte superior con el hombro/pecho.
+    float yPos = playerPos.y - 25.0f;
+
+    return sf::FloatRect(xPos, yPos, hitboxWidth, hitboxHeight);
 }
