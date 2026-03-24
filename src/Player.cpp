@@ -31,17 +31,13 @@ Player::Player()
     mSprite.setOrigin(mFrameWidth / 2.f, mFrameHeight / 2.f);
     mSprite.setScale(1.25f, 1.25f);
     mSprite.setPosition(100.f, 1000.f);
-    // --- CONFIGURACIÓN DEL ARMA ---
-    if (!mWeaponTexture.loadFromFile("assets/PickaxeWoodHands.png")) {
-        std::cerr << "Error: No se encontro PickaxeWoodHands.png" << std::endl;
-    }
-    mWeaponTexture.setSmooth(false); // <--- Vital para pixel art
+    mWeaponTexture.setSmooth(false); // <--- Vital for pixel art
     mWeaponSprite.setTexture(mWeaponTexture);
 
-    // Ponemos el pivote abajo del todo y en el centro (justo por donde se agarra el palo)
+    // We set the pivot at the very bottom and centered (exactly where the stick is held)
     mWeaponSprite.setOrigin(mWeaponTexture.getSize().x / 2.0f, mWeaponTexture.getSize().y);
 
-    // Le damos la misma escala que tiene tu personaje (1.25f)
+    // We give it the same scale as your character (1.25f)
     mWeaponSprite.setScale(1.25f, 1.25f);
 }
 
@@ -100,12 +96,12 @@ void Player::update(sf::Time dt, World& world) {
         mCombatTimer += dt.asSeconds();
 
         if (mCombatState == CombatState::Windup) {
-            // Fase 1: Levantando el arma (0.2 segundos)
+            // Phase 1: Raising the weapon (0.2 seconds)
             if (mCombatTimer >= 0.2f) {
                 mCombatState = CombatState::Active;
                 mCombatTimer = 0.0f;
-                mHasHitThisSwing = false; // <--- ¡NUEVO! Quitamos el seguro al lanzar el golpe
-                std::cout << "[COMBATE] !ZAS! Golpe activo." << std::endl;
+                mHasHitThisSwing = false; // <--- NEW! We remove the safety lock when swinging
+                std::cout << "[COMBAT] WHAM! Active hit." << std::endl;
             }
         }
         else if (mCombatState == CombatState::Active) {
@@ -125,41 +121,74 @@ void Player::update(sf::Time dt, World& world) {
     }
 
     // ==========================================
-    // 1.5 VISUALES DEL ARMA (COREOGRAFÍA Y REPOSO)
+    // 1.5 WEAPON VISUALS (CHOREOGRAPHY AND REST)
     // ==========================================
-    bool isHoldingPickaxe = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24);
-    if (isHoldingPickaxe) {
+    // We check if holding a Pickaxe (21-24) or a Sword (31-34)
+    bool isHoldingWeapon = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
+                           (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
+
+    if (isHoldingWeapon) {
+        // 1. WE REQUEST THE HAND TEXTURE FROM THE WORLD (We no longer use the inventory one!)
+        const sf::Texture* tex = world.getHeldTexture(mEquippedWeaponID);
+
+        if (tex) {
+            if (mWeaponSprite.getTexture() != tex) {
+                mWeaponSprite.setTexture(*tex, true);
+
+                // NEW ORIGIN! We shift the rotation point to the hilt.
+                mWeaponSprite.setOrigin(tex->getSize().x * 0.15f, tex->getSize().y * 0.75f);
+            }
+        }
+
         float facingDir = (mSprite.getScale().x > 0) ? 1.0f : -1.0f;
 
-        // Los mismos ajustes que pusimos antes para que salga del puño
-        float handOffsetX = 25.0f * facingDir;
-        float handOffsetY = 15.0f;
+        // --- NEW OFFSETS AND SCALE (SMALLER AND CLOSER TO HAND) ---
+        float handOffsetX = 22.0f * facingDir; // Fine adjustment (X) to place it in the fist
+        float handOffsetY = 5.0f;             // Fine adjustment (Y) to place it in the fist
 
-        // 1. SIEMPRE lo pegamos a la mano y lo volteamos
         mWeaponSprite.setPosition(mSprite.getPosition().x + handOffsetX, mSprite.getPosition().y + handOffsetY);
-        mWeaponSprite.setScale(1.25f * facingDir, 1.25f);
 
-        // 2. DECIDIMOS LA ROTACIÓN
+        // WE REDUCE THE SCALE (1.25f -> 0.85f) so it doesn't look giant
+        mWeaponSprite.setScale(0.85f * facingDir, 0.85f);
+
+        // ==========================================
+        // 3. PROFESSIONAL CHOREOGRAPHY (EASING MATHS)
+        // ==========================================
         if (mCombatState != CombatState::None) {
-            // --- ESTAMOS ATACANDO (Coreografía) ---
+
             if (mCombatState == CombatState::Windup) {
+                // PHASE 1: WINDUP (Builds up power slowing at the top)
                 float progress = mCombatTimer / 0.2f;
-                mWeaponSprite.setRotation(-60.0f * progress * facingDir);
+                float ease = 1.0f - std::pow(1.0f - progress, 3.0f); // Ease Out Cubic
+                mWeaponSprite.setRotation(-70.0f * ease * facingDir);
             }
             else if (mCombatState == CombatState::Active) {
+                // PHASE 2: IMPACT (Accelerates brutally downwards)
                 float progress = mCombatTimer / 0.1f;
-                mWeaponSprite.setRotation((-60.0f + (150.0f * progress)) * facingDir);
+                float ease = std::pow(progress, 3.0f); // Ease In Cubic
+
+                // Sweeps from -70º to +100º
+                float currentRot = -70.0f + (170.0f * ease);
+
+                // IMPACT SPIN (Spin Recoil): In the last milliseconds, the weapon bounces
+                float spin = 0.0f;
+                if (progress > 0.8f) {
+                    float impactProg = (progress - 0.8f) / 0.2f;
+                    spin = std::pow(impactProg, 2.0f) * 15.0f; // Small extra 15-degree vibration
+                }
+
+                mWeaponSprite.setRotation((currentRot + spin) * facingDir);
             }
             else if (mCombatState == CombatState::Recovery) {
-                mWeaponSprite.setRotation(90.0f * facingDir);
+                // PHASE 3: RECOVER BALANCE (Smoothly returns to idle)
+                float progress = mCombatTimer / 0.3f;
+                float ease = 1.0f - std::pow(1.0f - progress, 2.0f); // Ease Out Quad
+                mWeaponSprite.setRotation((100.0f - (100.0f * ease)) * facingDir);
             }
         }
         else {
-            // --- ESTAMOS EN REPOSO / CAMINANDO ---
-            // Le damos una pequeña inclinación hacia atrás/arriba para que parezca que
-            // lo lleva apoyado al hombro o listo para usarse.
-            // ¡Prueba a cambiar este -20.0f si lo quieres más recto o más caído!
-            mWeaponSprite.setRotation(1.0f * facingDir);
+            // IDLE: Natural relaxed tilt
+            mWeaponSprite.setRotation(5.0f * facingDir);
         }
     }
 
@@ -268,18 +297,22 @@ void Player::update(sf::Time dt, World& world) {
     }
 
     // ==========================================
-    // DECIDIR ANIMACIÓN (Depende del movimiento y del arma)
+    // DECIDE ANIMATION (Depends on movement and weapon)
     // ==========================================
-    isHoldingPickaxe = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24);
+    // ==========================================
+    // DECIDE ANIMATION (Depends on movement and weapon)
+    // ==========================================
+    isHoldingWeapon = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
+                      (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
 
     if (std::abs(mVelocity.x) > 10.0f) {
         mCurrentState = AnimState::Walk;
-        // Si tiene el pico, usa la fila 3 (Caminar con arma). Si no, la fila 1 (Caminar normal)
-        mCurrentRow = isHoldingPickaxe ? 3 : 1;
+        // If holding a pickaxe/sword, use row 3 (Walk with weapon). Otherwise, row 1 (Normal walk)
+        mCurrentRow = isHoldingWeapon ? 3 : 1;
     } else {
         mCurrentState = AnimState::Idle;
-        // Si tiene el pico, usa la fila 2 (Quieto con arma). Si no, la fila 0 (Quieto normal)
-        mCurrentRow = isHoldingPickaxe ? 2 : 0;
+        // If holding a pickaxe/sword, use row 2 (Idle with weapon). Otherwise, row 0 (Normal idle)
+        mCurrentRow = isHoldingWeapon ? 2 : 0;
     }
 
     // Player
@@ -300,11 +333,11 @@ void Player::update(sf::Time dt, World& world) {
     ));
 
     // ---------------------------------------------------------
-    // FLIP (TURN) - ¡Corregido!
+    // FLIP (TURN) - Corrected!
     // ---------------------------------------------------------
     float scale = 1.25f;
 
-    // Usamos mMoveDirection (la intención del teclado) en lugar de mVelocity (las físicas)
+    // We use mMoveDirection (keyboard intent) instead of mVelocity (physics)
     if (mMoveDirection > 0) {
         mSprite.setScale(scale, scale);
     }
@@ -320,15 +353,16 @@ void Player::update(sf::Time dt, World& world) {
  * @param lightColor The current light color (for day/night cycle).
  */
 void Player::render(sf::RenderWindow& window, sf::Color lightColor) {
-    // Dibujamos al jugador
+    // Draw the player
     mSprite.setColor(lightColor);
     window.draw(mSprite);
 
-    // --- NUEVO: Dibujamos el arma SIEMPRE que la tengamos equipada ---
-    bool isHoldingPickaxe = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24);
+    // --- NEW: ALWAYS draw the weapon if equipped ---
+    bool isHoldingWeapon = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
+                           (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
 
-    if (isHoldingPickaxe) {
-        // Le aplicamos el color de la luz ambiental (+ un toque de brillo)
+    if (isHoldingWeapon) {
+        // We apply the ambient light color (+ a touch of brightness)
         sf::Color weaponColor = lightColor;
         weaponColor.r = std::min(255, weaponColor.r + 30);
         weaponColor.g = std::min(255, weaponColor.g + 30);
@@ -400,35 +434,35 @@ sf::FloatRect Player::getWeaponHitbox() const {
     float facingDir = (mSprite.getScale().x > 0) ? 1.0f : -1.0f;
 
     // ==========================================
-    // NUEVA CONFIGURACIÓN DE HITBOX (Como tu imagen)
+    // NEW HITBOX CONFIGURATION (Like your image)
     // ==========================================
 
-    // ANCHO (Alcance hacia adelante):
-    // He puesto 75px. ¡Es bastante largo para que se parezca al alcance de minería!
-    // Tu personajeScaledWidth es ~20px, así que esto llega 3 veces más lejos.
+    // WIDTH (Forward reach):
+    // I set it to 75px. It's quite long to match the mining reach!
+    // Your characterScaledWidth is ~20px, so this reaches 3 times further.
     float hitboxWidth = 75.0f;
 
-    // ALTO: 55px. Cubre desde el pecho hasta las rodillas.
+    // HEIGHT: 55px. Covers from the chest down to the knees.
     float hitboxHeight = 55.0f;
 
-    sf::Vector2f playerPos = mSprite.getPosition(); // Recordamos: El origin es el CENTRO.
+    sf::Vector2f playerPos = mSprite.getPosition(); // Remember: The origin is the CENTER.
 
-    // --- CÁLCULO DE POSICIÓN X (Horizontal) ---
-    // Queremos que la caja empiece un poco *detrás* del puño extendido,
-    // en la zona del hombro/pecho, para que no falles a enemigos pegados a ti.
-    // Usamos un offset de 5px desde el centro.
+    // --- X POSITION CALCULATION (Horizontal) ---
+    // We want the box to start slightly *behind* the extended fist,
+    // in the shoulder/chest area, so you don't miss enemies right in front of you.
+    // We use a 5px offset from the center.
     float horizontalOffsetFromCenter = 5.0f * facingDir;
 
     float xPos = 0.0f;
-    if (facingDir > 0) { // Mirando Derecha
+    if (facingDir > 0) { // Facing Right
         xPos = playerPos.x + horizontalOffsetFromCenter;
-    } else { // Mirando Izquierda (Restamos el ancho para calcular la esquina izquierda)
+    } else { // Facing Left (We subtract the width to calculate the left corner)
         xPos = playerPos.x + horizontalOffsetFromCenter - hitboxWidth;
     }
 
-    // --- CÁLCULO DE POSICIÓN Y (Vertical) ---
-    // Recordamos: El origin es el WAIST (Cintura/Ombligo). En SFML la Y sube restando.
-    // Subimos la caja 25px para alinear la parte superior con el hombro/pecho.
+    // --- Y POSITION CALCULATION (Vertical) ---
+    // Remember: The origin is the WAIST (Belly button). In SFML, Y goes up by subtracting.
+    // We raise the box 25px to align the top with the shoulder/chest.
     float yPos = playerPos.y - 25.0f;
 
     return sf::FloatRect(xPos, yPos, hitboxWidth, hitboxHeight);

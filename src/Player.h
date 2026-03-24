@@ -26,12 +26,12 @@ public:
     void heal(int amount);
     void setOverweight(bool isHeavy) { mIsOverweight = isHeavy; }
     void setEquippedWeapon(int itemID) { mEquippedWeaponID = itemID; }
-    // --- COMBATE ---
+    // --- COMBAT ---
     sf::FloatRect getWeaponHitbox() const;
     bool canDealDamage() const { return mCombatState == CombatState::Active && !mHasHitThisSwing; }
-    void registerHit() { mHasHitThisSwing = true; } // Llamaremos a esto cuando acertemos a un enemigo
+    void registerHit() { mHasHitThisSwing = true; } // We will call this when we hit an enemy
 
-    // --- SISTEMA DE COMBATE SOULS-LIKE ---
+    // --- SOULS-LIKE COMBAT SYSTEM ---
     enum class CombatState {
         None,
         Windup,
@@ -39,6 +39,10 @@ public:
         Recovery
     };
     CombatState getCombatState() const { return mCombatState; }
+
+    // --- USEFUL SETTERS
+    void setHp(int hp) { mHp = hp; }
+    void setVelocity(sf::Vector2f vel) { mVelocity = vel; }
 
 private:
     sf::Texture mTexture;
@@ -81,9 +85,9 @@ private:
     CombatState mCombatState = CombatState::None;
     float mCombatTimer = 0.0f;
 
-    // --- ARMA / COMBATE VISUAL ---
+    // --- WEAPON / VISUAL COMBAT ---
     sf::Texture mWeaponTexture;
     sf::Sprite mWeaponSprite;
-    int mEquippedWeaponID = 0; // Guardará el ID del arma que tenemos en la mano
-    bool mHasHitThisSwing = false; // El seguro para no dar 60 golpes por segundo
+    int mEquippedWeaponID = 0; // Will store the ID of the weapon equipped in hand
+    bool mHasHitThisSwing = false; // Safety lock to avoid hitting 60 times per second
 };

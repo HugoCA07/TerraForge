@@ -105,27 +105,44 @@ void World::generateChunk(int chunkX) {
     }
 
     // ---------------------------------------------------------
-    // STEP 1.5: CAVES (Autómata Celular por Chunk)
+    // STEP 1.5: CAVES (Gusanos Explorables + Huecos Aislados)
     // ---------------------------------------------------------
-    // 1. Añadimos ruido (agujeros aleatorios) solo bajo tierra
+    // 1. Añadimos ruido mixto: Túneles matemáticos y huecos aleatorios
     for (int localX = 0; localX < CHUNK_WIDTH; ++localX) {
+        int globalX = (chunkX * CHUNK_WIDTH) + localX;
         int surfaceY = surfaceHeights[localX];
 
-        // Empezamos 10 bloques por debajo de la superficie para no romper la hierba
-        // y paramos 5 bloques antes del fondo para no romper la Bedrock
+        // Empezamos 10 bloques por debajo de la superficie
         for (int y = surfaceY + 10; y < WORLD_HEIGHT - 5; ++y) {
             int index = y * CHUNK_WIDTH + localX;
 
             // Solo rompemos la piedra
             if (newChunk[index] == 3) {
-                if (rand() % 100 < 45) { // 45% de probabilidad de ser aire
-                    newChunk[index] = 0; // Aire
+
+                // A) CUEVAS EXPLORABLES (Spaghetti Caves)
+                // Combinamos 3 ondas diferentes para crear patrones caóticos pero conectados
+                float n1 = std::sin((globalX + seed) / 20.0f);
+                float n2 = std::cos((y + seed) / 15.0f);
+                float n3 = std::sin((globalX - y) / 35.0f);
+                float caveNoise = n1 + n2 + n3;
+
+                // Si las ondas se cancelan y dan un valor cercano a 0, creamos un túnel.
+                // El 0.4f determina la "anchura" de estos súper túneles.
+                bool isWormCave = std::abs(caveNoise) < 0.4f;
+
+                // B) HUECOS AISLADOS (Tu sistema original)
+                // Reducimos un poco la probabilidad (ej: de 45 a 40) porque los túneles ya vacían terreno
+                bool isPocketCave = (rand() % 100 < 40);
+
+                // Si es un túnel principal o un hueco aburrido, lo convertimos en aire
+                if (isWormCave || isPocketCave) {
+                    newChunk[index] = 0;
                 }
             }
         }
     }
 
-    // 2. Suavizamos el ruido para crear túneles (4 pasadas)
+    // 2. Suavizamos todo (Túneles y huecos) con el Autómata Celular
     int smoothingPasses = 4;
     for (int p = 0; p < smoothingPasses; ++p) {
         std::vector<int> tempChunk = newChunk; // Mapa temporal para leer el estado anterior
@@ -137,29 +154,26 @@ void World::generateChunk(int chunkX) {
                 int index = y * CHUNK_WIDTH + localX;
                 int neighborWalls = 0;
 
-                // Contamos los muros vecinos en una cuadrícula de 3x3
+                // Contamos los muros vecinos
                 for (int nx = localX - 1; nx <= localX + 1; ++nx) {
                     for (int ny = y - 1; ny <= y + 1; ++ny) {
-                        // Si está dentro de los límites de este Chunk
                         if (nx >= 0 && nx < CHUNK_WIDTH && ny >= 0 && ny < WORLD_HEIGHT) {
-                            if (nx != localX || ny != y) { // No nos contamos a nosotros mismos
+                            if (nx != localX || ny != y) {
                                 if (tempChunk[ny * CHUNK_WIDTH + nx] != 0) {
                                     neighborWalls++;
                                 }
                             }
                         } else {
-                            // Si mira fuera del Chunk, asumimos que hay piedra.
-                            // Esto evitará que las cuevas se salgan del mapa por los lados rotos.
                             neighborWalls++;
                         }
                     }
                 }
 
-                // Aplicamos las reglas de supervivencia
+                // Aplicamos las reglas de supervivencia para pulir los bordes
                 if (neighborWalls > 4) {
-                    newChunk[index] = 3; // Se convierte/mantiene en Piedra
+                    newChunk[index] = 3; // Mantiene piedra
                 } else if (neighborWalls < 4) {
-                    newChunk[index] = 0; // Se deshace y se convierte en Aire
+                    newChunk[index] = 0; // Se convierte en Aire
                 }
             }
         }
@@ -226,13 +240,16 @@ void World::generateChunk(int chunkX) {
         int globalX = (chunkX * CHUNK_WIDTH) + localX;
         int surfaceY = surfaceHeights[localX];
 
-        if ((std::abs(globalX * 437) % 100) < 10 && localX > 1 && localX < CHUNK_WIDTH - 2) {
-            int treeHeight = 4;
+        if ((std::abs(globalX * 437) % 100) < 10 && localX > 2 && localX < CHUNK_WIDTH - 3) {
+            int treeHeight = 5 + (rand() % 11); // Altura aleatoria entre 5 y 15 bloques
             int treeTopY = surfaceY - treeHeight;
 
-            // Leaves
-            for (int lx = -1; lx <= 1; ++lx) {
-                for (int ly = -1; ly <= 1; ++ly) {
+            // Leaves (Copa del árbol más frondosa)
+            for (int lx = -2; lx <= 2; ++lx) {
+                for (int ly = -2; ly <= 1; ++ly) {
+                    // Cortar las esquinas para hacer un círculo/óvalo en lugar de un cuadrado
+                    if (std::abs(lx) == 2 && std::abs(ly) == 2) continue;
+
                     int leafY = treeTopY + ly;
                     int leafX = localX + lx;
                     if (leafY > 0 && leafY < WORLD_HEIGHT) {
@@ -241,7 +258,7 @@ void World::generateChunk(int chunkX) {
                     }
                 }
             }
-            // Trunk
+            // Trunk (Tronco)
             for (int i = 1; i <= treeHeight; ++i) {
                 int trunkY = surfaceY - i;
                 if (trunkY > 0) newChunk[trunkY * CHUNK_WIDTH + localX] = 4;
@@ -312,59 +329,68 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
     float lightRadius = 250.0f;
 
     // Lambda to calculate light
+    // Lambda para calcular la luz de cada bloque
     auto calculateLight = [&](sf::Vector2f blockPos, sf::Color baseColor) -> sf::Color {
-        float r = baseColor.r / 255.f;
-        float g = baseColor.g / 255.f;
-        float b = baseColor.b / 255.f;
 
-        float maxTorchLight = 0.0f;
+        // 1. Empezamos con el color base (la oscuridad de la cueva o la luz del día)
+        float r = baseColor.r;
+        float g = baseColor.g;
+        float b = baseColor.b;
+
+        // 2. Comprobamos las antorchas cercanas
+        // En Terraria la luz es RGB. Una antorcha emite (255, 200, 150) aprox.
+        float torchR = 0.0f;
+        float torchG = 0.0f;
+        float torchB = 0.0f;
 
         for (const auto& lightPos : lightSources) {
-            float dx = blockPos.x - lightPos.x;
-            float dy = blockPos.y - lightPos.y;
-            float distSq = dx*dx + dy*dy;
-            float radiusSq = lightRadius * lightRadius;
+            float dx = std::abs(blockPos.x - lightPos.x); // Distancia X
+            float dy = std::abs(blockPos.y - lightPos.y); // Distancia Y
 
-            if (distSq < radiusSq) {
-                float dist = std::sqrt(distSq);
+            // OPTIMIZACIÓN: Si está lejos, ni calculamos
+            if (dx > lightRadius || dy > lightRadius) continue;
+
+            // FÓRMULA ESTILO TERRARIA: Distancia simple
+            float dist = std::sqrt(dx*dx + dy*dy);
+
+            if (dist < lightRadius) {
+                // Intensidad lineal (1.0 en el centro, 0.0 en el borde)
                 float intensity = 1.0f - (dist / lightRadius);
-                if (intensity > maxTorchLight) maxTorchLight = intensity;
+
+                // Acumulamos luz (Color Fuego: Mucho Rojo, Bastante Verde, Poco Azul)
+                // Usamos std::max para que las luces no se quemen (no sumen al infinito)
+                torchR = std::max(torchR, intensity * 255.0f);   // Rojo a tope
+                torchG = std::max(torchG, intensity * 200.0f);   // Verde alto (para hacer naranja/amarillo)
+                torchB = std::max(torchB, intensity * 120.0f);   // Azul bajo
             }
         }
 
-        r = std::max(r, maxTorchLight);
-        g = std::max(g, maxTorchLight);
-        b = std::max(b, maxTorchLight);
+        // 3. Mezclamos la luz ambiente con la luz de la antorcha (Screen blending simple)
+        // Nos quedamos con el valor más alto: o hay luz de sol, o hay luz de antorcha
+        r = std::max(r, torchR);
+        g = std::max(g, torchG);
+        b = std::max(b, torchB);
 
-        if (r > 1.0f) r = 1.0f;
-        if (g > 1.0f) g = 1.0f;
-        if (b > 1.0f) b = 1.0f;
+        // Clamping (que no pase de 255)
+        if (r > 255) r = 255;
+        if (g > 255) g = 255;
+        if (b > 255) b = 255;
 
-        if (maxTorchLight > 0.1f) b *= 0.8f; // Warm tint
-
-        return sf::Color(
-            static_cast<sf::Uint8>(r * 255),
-            static_cast<sf::Uint8>(g * 255),
-            static_cast<sf::Uint8>(b * 255)
-        );
+        return sf::Color(static_cast<sf::Uint8>(r), static_cast<sf::Uint8>(g), static_cast<sf::Uint8>(b));
     };
 
     // -----------------------------------------------------------
-    // LOOP 1: WALLS (BACKGROUND) - [FIXED TO AVOID CRASH]
+    // LOOP 1: WALLS (BACKGROUND)
     // -----------------------------------------------------------
     for (int cx = startChunk; cx <= endChunk; ++cx) {
-
-        // CORRECTION: We use find() to get the pointer to the vector safely
         auto itBg = mBackgroundChunks.find(cx);
-
-        // If the background chunk doesn't exist or is empty, skip
         if (itBg == mBackgroundChunks.end() || itBg->second.empty()) continue;
 
-        const auto& bgBlocks = itBg->second; // Safe reference
+        const auto& bgBlocks = itBg->second;
 
         for (int y = 0; y < WORLD_HEIGHT; ++y) {
-             float py = y * mTileSize;
-             if (py < top || py > bottom) continue;
+            float py = y * mTileSize;
+            if (py < top || py > bottom) continue;
 
             for (int lx = 0; lx < CHUNK_WIDTH; ++lx) {
                 int blockID = bgBlocks[y * CHUNK_WIDTH + lx];
@@ -379,10 +405,16 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
 
                     sf::Vector2f center(px + mTileSize/2, py + mTileSize/2);
 
-                    sf::Color wallBase = ambientColor;
-                    wallBase.r /= 2; wallBase.g /= 2; wallBase.b /= 2;
+                    // 1. Calculamos la luz NORMAL (Antorchas + Ambiente)
+                    sf::Color lightColor = calculateLight(center, ambientColor);
 
-                    sprite.setColor(calculateLight(center, wallBase));
+                    // 2. TRUCO DE PROFUNDIDAD: Oscurecemos la pared un 50%
+                    // Así, incluso con una antorcha al lado, la pared se verá "al fondo"
+                    lightColor.r = static_cast<sf::Uint8>(lightColor.r * 0.5f);
+                    lightColor.g = static_cast<sf::Uint8>(lightColor.g * 0.5f);
+                    lightColor.b = static_cast<sf::Uint8>(lightColor.b * 0.5f);
+
+                    sprite.setColor(lightColor);
                     window.draw(sprite);
                 }
             }
@@ -495,12 +527,6 @@ void World::setBlock(int x, int y, int type) {
 
     // 2. CHANGE THE BLOCK
     mChunks[chunkIndex][y * CHUNK_WIDTH + localX] = type;
-
-    // 3. GENERATE DROP (If we break a solid block and place air)
-    // Only if the old block was not Air (0) and the new one is Air (0)
-    if (type == 0 && oldType != 0) {
-        spawnItem(x, y, oldType);
-    }
 }
 
 /**
@@ -521,6 +547,27 @@ void World::loadTextures() {
         mTextures[id] = tex;
     };
 
+    // --- NUEVO: CARGAR TEXTURAS PROFESIONALES (ARMAS EN MANO) ---
+    auto loadHeld = [&](int id, const std::string& filename) {
+        sf::Texture tex;
+        if (tex.loadFromFile(filename)) {
+            mHeldTextures[id] = tex;
+        } else {
+            std::cerr << "Error: Faltan los sprites de mano profesionales: " << filename << std::endl;
+        }
+    };
+
+    // Debes crear estas imágenes en tu carpeta assets (Ej: 64x64 o 128x128 con mango largo)
+    loadHeld(21, "assets/Pickaxewood_hands.png");
+    loadHeld(22, "assets/Pickaxestone_hands.png");
+    loadHeld(23, "assets/Pickaxeiron_hands.png");
+    loadHeld(24, "assets/Pickaxetungsten_hands.png");
+
+    loadHeld(31, "assets/Swordwood_hands.png");
+    loadHeld(32, "assets/Swordstone_hands.png");
+    loadHeld(33, "assets/Swordiron_hands.png");
+    loadHeld(34, "assets/Swordtungsten_hands.png");
+
     // --- LOAD YOUR ASSETS HERE ---
     // Make sure these files exist in your "assets" folder!
     load(1, "assets/Dirt.png");  // ID 1: Dirt
@@ -535,7 +582,31 @@ void World::loadTextures() {
     load(10, "assets/Cobalt.png"); // ID 10: Cobalt
     load(11, "assets/Tungsten.png"); // ID 11: Tungsten
     load(12, "assets/Bedrock.png"); // ID 12: Bedrock
-    load(25, "assets/Door.png"); // ID 25: Door
+    // DOORS : OPEN - CLOSED
+    load(25, "assets/DoorBottomClosed.png"); // ID 25: Door
+    load(26, "assets/DoorMidClosed.png"); // ID 25: Door
+    load(27, "assets/DoorTopClosed.png"); // ID 25: Door
+    load(28, "assets/DoorBottomOpen.png"); // ID 25: Door
+    load(29, "assets/DoorMidOpen.png"); // ID 25: Door
+    load(30, "assets/DoorTopOpen.png"); // ID 25: Door
+
+
+
+    // --- BLOQUES INTERACTIVOS ---
+    sf::Texture texTable;
+    if (texTable.loadFromFile("assets/CraftingTable.png")) {
+        mTextures[40] = texTable;
+    }
+
+    sf::Texture texFurnace;
+    if (texFurnace.loadFromFile("assets/Furnace.png")) {
+        mTextures[41] = texFurnace;
+    }
+
+    sf::Texture texChest;
+    if (texChest.loadFromFile("assets/Chest.png")) {
+        mTextures[42] = texChest;
+    }
 
     // --- TOOLS ---
     load(21, "assets/PickaxeWood.png");
@@ -543,8 +614,20 @@ void World::loadTextures() {
     load(23, "assets/PickaxeIron.png");
     load(24, "assets/Pickaxetungsten.png");
 
+    // --- SWORDS ---
+    load(31, "assets/SwordWood.png");
+    load(32, "assets/SwordStone.png");
+    load(33, "assets/SwordIron.png");
+    load(34, "assets/SwordTungsten.png");
+
     // --- MEAT ---
-    load(30, "assets/Meat.png");
+    load(50, "assets/Meat.png");
+
+    // --- LINGOTES Y MATERIALES ---
+    load(51, "assets/IronIngot.png");
+    load(52, "assets/CopperIngot.png");
+    load(53, "assets/CobaltIngot.png");
+    load(54, "assets/TungstenIngot.png");
 }
 
 const sf::Texture* World::getTexture(int id) const {
@@ -717,4 +800,12 @@ void World::spawnItem(int id, sf::Vector2f pos) {
     item.timeAlive = 0.0f;
 
     mItems.push_back(item);
+}
+
+const sf::Texture* World::getHeldTexture(int id) const {
+    auto it = mHeldTextures.find(id);
+    if (it != mHeldTextures.end()) {
+        return &it->second;
+    }
+    return nullptr;
 }

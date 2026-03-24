@@ -39,14 +39,21 @@ public:
     void saveToStream(std::ofstream& file);
     void loadFromStream(std::ifstream& file);
     void spawnItem(int id, sf::Vector2f pos);
+    void spawnItem(int x, int y, int id);
 
     // --- NEW: COLLISION HELPER ---
     // Returns true if the block ID is solid (collidable)
+    // Returns true if the block ID is solid (collidable)
+    // Returns true if the block ID is solid (collidable)
     static bool isSolid(int blockID) {
-        // 0 = Air, 4 = Wood (Passable), 5 = Leaves (Passable), 6 = Torch, 25 = Door
-        return (blockID != 0 && blockID != 4 && blockID != 5 && blockID != 6 && blockID != 25);
+        // 0 = Air, 4 = Wood (Can be walked through!), 5 = Leaves, 6 = Torch
+        // 28, 29, 30 = Open Door
+        return (blockID != 0 && blockID != 4 && blockID != 5 && blockID != 6 &&
+            blockID != 28 && blockID != 29 && blockID != 30);
     }
 
+    // Gets the LARGE texture designed for the player's hand
+    const sf::Texture* getHeldTexture(int id) const;
 private:
     // --- GENERATION HELPERS ---
     void generateChunk(int chunkX);
@@ -76,6 +83,7 @@ private:
 
     // --- ITEMS ---
     std::vector<ItemDrop> mItems;
-    // Helper to create and item
-    void spawnItem(int x, int y, int id);
+
+    // Dedicated textures for when the weapon is equipped in hand
+    std::map<int, sf::Texture> mHeldTextures;
 };

@@ -40,11 +40,15 @@ Open a Pull Request.
 🗺️ Roadmap
 
 
-[~] Basic movement and sprite rendering.
+[x] Basic movement and sprite rendering.
 
-[~] Tile-based building system.
+[x] Tile-based building system.
 
-[~] Procedural biomes, caves and minerals generation (Forest, Desert, etc...).
+[x] Procedural biomes, caves and minerals generation (Forest, Desert, etc...).
+
+[x] Crafting & Inventory system.
+
+[x] Characters and basic interactions (Sounds, Dodo character, etc.).
 
 [ ] Enemy AI implementation (A* Pathfinding).
 

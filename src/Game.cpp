@@ -17,10 +17,36 @@ Game::Game()
     , mMiningPos(0, 0)
     , mMiningTimer(0.0f)
     , mCurrentHardness(0.0f)
-    , mSoundTimer(0.0f) // Initialize the timer
     , mSpawnTimer(5.0f) // Start with 5 seconds so it spawns quickly the first time
 {
     mWindow.setFramerateLimit(120);
+
+    // --- INITIALIZE DEATH SYSTEM ---
+    mIsPlayerDead = false;
+    mRespawnTimer = 0.0f;
+
+    // 1. Dark Background (Bloody)
+    mDeathOverlay.setSize(sf::Vector2f(1920, 1080));
+    mDeathOverlay.setFillColor(sf::Color(50, 0, 0, 150)); // Transparent dark red
+
+    // 2. Title "YOU DIED"
+    mDeathTitleText.setFont(mFont);
+    mDeathTitleText.setString("HAS MUERTO");
+    mDeathTitleText.setCharacterSize(100);
+    mDeathTitleText.setFillColor(sf::Color::Red);
+    mDeathTitleText.setOutlineColor(sf::Color::Black);
+    mDeathTitleText.setOutlineThickness(5.0f);
+    // Center the text
+    sf::FloatRect titleBounds = mDeathTitleText.getLocalBounds();
+    mDeathTitleText.setOrigin(titleBounds.width / 2.0f, titleBounds.height / 2.0f);
+    mDeathTitleText.setPosition(1920 / 2.0f, 1080 / 2.0f - 50.0f);
+
+    // 3. Subtitle "Respawning..."
+    mDeathSubText.setFont(mFont);
+    mDeathSubText.setCharacterSize(40);
+    mDeathSubText.setFillColor(sf::Color::White);
+    mDeathSubText.setOutlineColor(sf::Color::Black);
+    mDeathSubText.setOutlineThickness(2.0f);
 
     // --- LOAD SOUNDS ---
     // 1. HIT (Strike)
@@ -54,6 +80,26 @@ Game::Game()
         // If it fails, warn in console (SFML will use an ugly default font or draw nothing)
         std::cerr << "Error: Could not load assets/font.ttf" << std::endl;
     }
+
+    // --- LOAD HUD ---
+    // Load your caveman designs
+    if (!mHeartFullTex.loadFromFile("assets/HeartFull.png")) {
+        // Basic error handling (in case you forget to put the image)
+        std::cerr << "Error: Could not load HeartFull.png" << std::endl;
+    }
+    if (!mHeartEmptyTex.loadFromFile("assets/HeartEmpty.png")) {
+        std::cerr << "Error: Could not load HeartEmpty.png" << std::endl;
+    }
+
+    // --- LOAD FURNACE INTERFACE ---
+    if (!mFurnaceBgTex.loadFromFile("assets/FurnaceUI.png")) { std::cerr << "Error FurnaceUI\n"; }
+    if (!mFurnaceFireTex.loadFromFile("assets/FurnaceFire.png")) { std::cerr << "Error FurnaceFire\n"; }
+    if (!mFurnaceArrowTex.loadFromFile("assets/FurnaceArrow.png")) { std::cerr << "Error FurnaceArrow\n"; }
+
+    mFurnaceBgSprite.setTexture(mFurnaceBgTex);
+    mFurnaceFireSprite.setTexture(mFurnaceFireTex);
+    mFurnaceArrowSprite.setTexture(mFurnaceArrowTex);
+
     // Base text configuration
     mUiText.setFont(mFont);
     mUiText.setCharacterSize(20);
@@ -61,53 +107,95 @@ Game::Game()
     mUiText.setOutlineColor(sf::Color::Black);
     mUiText.setOutlineThickness(1.0f);
 
+    // --- GENERATE SOFT LIGHT TEXTURE ---
+    sf::Image lightImg;
+    lightImg.create(256, 256, sf::Color::Transparent);
+
+    // We create a radial gradient: White in the center, transparent at the edges
+    for (int y = 0; y < 256; ++y) {
+        for (int x = 0; x < 256; ++x) {
+            float dx = x - 128.0f;
+            float dy = y - 128.0f;
+            float distance = std::sqrt(dx * dx + dy * dy);
+            float radius = 128.0f;
+
+            if (distance < radius) {
+                // We calculate intensity (1.0 in the center, 0.0 at the edge)
+                float intensity = 1.0f - (distance / radius);
+                // We use pow to make the light falloff more natural (non-linear)
+                intensity = std::pow(intensity, 1.5f);
+
+                // White color with variable Alpha
+                lightImg.setPixel(x, y, sf::Color(255, 255, 255, static_cast<sf::Uint8>(255 * intensity)));
+            }
+        }
+    }
+
     // --- PREPARE NEW INVENTORY ---
     mBackpack.resize(30); // Create 30 empty slots
+
     // --- CRAFTING RECIPES ---
-    // 1. Wood Pickaxe (ID 21): Requires 10 Wood (ID 4)
-    mRecipes.push_back({21, 1, {{4, 10}}});
+    // MANUAL (false)
+    mRecipes.push_back({ItemID::WOOD_PICKAXE, 1, false, {{ItemID::WOOD, 10}}});
+    mRecipes.push_back({ItemID::WOOD_SWORD, 1, false, {{ItemID::WOOD, 7}}});
+    mRecipes.push_back({ItemID::TORCH, 5, false, {{ItemID::WOOD, 2}, {ItemID::LEAVES, 2}}});
+    mRecipes.push_back({ItemID::CRAFTING_TABLE, 1, false, {{ItemID::WOOD, 10}}});
 
-    // 2. Stone Pickaxe (ID 22): Requires 10 Stone (ID 3)
-    mRecipes.push_back({22, 1, {{3, 10}}});
+    // ADVANCED - REQUIRE TABLE (true)
+    mRecipes.push_back({ItemID::STONE_PICKAXE, 1, true, {{ItemID::WOOD, 5}, {ItemID::STONE, 5}}});
+    mRecipes.push_back({ItemID::IRON_PICKAXE, 1, true, {{ItemID::IRON_INGOT, 5}, {ItemID::WOOD, 5}}});
+    mRecipes.push_back({ItemID::TUNGSTEN_PICKAXE, 1, true, {{ItemID::TUNGSTEN_INGOT, 5}, {ItemID::WOOD, 5}}});
+    mRecipes.push_back({ItemID::STONE_SWORD, 1, true, {{ItemID::WOOD, 2}, {ItemID::STONE, 6}}});
+    mRecipes.push_back({ItemID::IRON_SWORD, 1, true, {{ItemID::WOOD, 2}, {ItemID::IRON_INGOT, 6}}});
+    mRecipes.push_back({ItemID::TUNGSTEN_SWORD, 1, true, {{ItemID::WOOD, 2}, {ItemID::TUNGSTEN_INGOT, 6}}});
+    mRecipes.push_back({ItemID::DOOR, 1, true, {{ItemID::WOOD, 6}}});
+    mRecipes.push_back({ItemID::FURNACE, 1, true, {{ItemID::STONE, 10}}});
+    mRecipes.push_back({ItemID::CHEST, 1, true, {{ItemID::IRON_INGOT, 2}, {ItemID::WOOD, 5}}});
 
-    // 3. Iron Pickaxe (ID 23): Requires 5 Iron (ID 9) and 5 Wood (ID 4)
-    mRecipes.push_back({23, 1, {{9, 5}, {4, 5}}});
+    // --- ITEM DATABASE ---
+    mItemDatabase[ItemID::DIRT] = {"Dirt", 1.0f, 99};
+    mItemDatabase[ItemID::GRASS] = {"Grass", 1.0f, 99};
+    mItemDatabase[ItemID::STONE] = {"Stone", 2.0f, 99};
+    mItemDatabase[ItemID::WOOD] = {"Log", 1.5f, 99};
+    mItemDatabase[ItemID::LEAVES] = {"Leaves", 0.1f, 99};
+    mItemDatabase[ItemID::TORCH] = {"Torch", 0.2f, 99};
 
-    // 4. Tungsten Pickaxe (ID 24): Requires 5 Tungsten (ID 11) and 5 Wood (ID 4)
-    mRecipes.push_back({24, 1, {{11, 5}, {4, 5}}});
-
-    // NUEVAS RECETAS:
-    mRecipes.push_back({6, 5, {{4, 2},{5,2}}}); // Antorcha: 2 de Madera y 2 hojas = 4 Antorchas
-    mRecipes.push_back({25, 1, {{4, 6}}}); // Puerta: 6 de Madera = 1 Puerta
-
-    // Database: ID -> {Name, Weight, Max Stack}
-    mItemDatabase[1] = {"Dirt", 1.0f, 99};
-    mItemDatabase[2] = {"Grass", 1.0f, 99};
-    mItemDatabase[3] = {"Stone", 2.0f, 99};
-    mItemDatabase[4] = {"Log", 1.5f, 99};
-    mItemDatabase[5] = {"Leaves", 0.1f, 99};
-    mItemDatabase[6] = {"Torch", 0.2f, 99};
-    mItemDatabase[25] = {"Wooden Door", 5.0f, 99}; // <--- AÑADIMOS LA PUERTA (ID 25)
-
-    // --- NEW: MINERALS ---
-    mItemDatabase[7] = {"Coal", 1.0f, 99};     // Coal weighs less
-    mItemDatabase[8] = {"Copper", 2.0f, 99};      // (If you have copper)
-    mItemDatabase[9] = {"Iron", 2.0f, 99};
-    mItemDatabase[10] = {"Cobalt", 2.0f, 99};   // Cobalt weighs the same
-    mItemDatabase[11] = {"Tungsten", 2.0f, 99};
+    // Minerals
+    mItemDatabase[ItemID::COAL] = {"Coal", 1.0f, 99};
+    mItemDatabase[ItemID::COPPER] = {"Copper", 2.0f, 99};
+    mItemDatabase[ItemID::IRON] = {"Iron", 2.0f, 99};
+    mItemDatabase[ItemID::COBALT] = {"Cobalt", 2.0f, 99};
+    mItemDatabase[ItemID::TUNGSTEN] = {"Tungsten", 2.0f, 99};
 
     // Tools and Consumables
-    mItemDatabase[21] = {"Wood Pickaxe", 5.0f, 1};
-    mItemDatabase[22] = {"Stone Pickaxe", 5.0f, 1};
-    mItemDatabase[23] = {"Iron Pickaxe", 5.0f, 1};
-    mItemDatabase[24] = {"Tungsten Pickaxe", 5.0f, 1};
+    mItemDatabase[ItemID::WOOD_PICKAXE] = {"Wood Pickaxe", 5.0f, 1};
+    mItemDatabase[ItemID::STONE_PICKAXE] = {"Stone Pickaxe", 5.0f, 1};
+    mItemDatabase[ItemID::IRON_PICKAXE] = {"Iron Pickaxe", 5.0f, 1};
+    mItemDatabase[ItemID::TUNGSTEN_PICKAXE] = {"Tungsten Pickaxe", 5.0f, 1};
+    mItemDatabase[ItemID::MEAT] = {"Meat", 0.5f, 20};
 
-    mItemDatabase[30] = {"Meat", 0.5f, 20}; // Meat stacks up to 20
+    // Weapons
+    mItemDatabase[ItemID::WOOD_SWORD] = {"Wood Sword", 4.0f, 1};
+    mItemDatabase[ItemID::STONE_SWORD] = {"Stone Sword", 4.0f, 1};
+    mItemDatabase[ItemID::IRON_SWORD] = {"Iron Sword", 4.0f, 1};
+    mItemDatabase[ItemID::TUNGSTEN_SWORD] = {"Tungsten Sword", 4.0f, 1};
+
+    // Structures
+    mItemDatabase[ItemID::DOOR] = {"Wooden Door", 5.0f, 99};
+    mItemDatabase[ItemID::CRAFTING_TABLE] = {"Crafting Table", 3.0f, 99};
+    mItemDatabase[ItemID::FURNACE] = {"Furnace", 4.0f, 99};
+    mItemDatabase[ItemID::CHEST] = {"Chest", 4.0f, 99};
+
+    // Ingots
+    mItemDatabase[ItemID::IRON_INGOT] = {"Iron Ingot", 1.5f, 99};
+    mItemDatabase[ItemID::COPPER_INGOT] = {"Copper Ingot", 1.5f, 99};
+    mItemDatabase[ItemID::COBALT_INGOT] = {"Cobalt Ingot", 1.5f, 99};
+    mItemDatabase[ItemID::TUNGSTEN_INGOT] = {"Tungsten Ingot", 1.5f, 99};
 
     // Give initial items for testing
-    addItemToBackpack(1, 15); // 15 dirt
-    addItemToBackpack(30, 5); // 5 meat
-    addItemToBackpack(6,5);
+    addItemToBackpack(ItemID::DIRT, 15);
+    addItemToBackpack(ItemID::MEAT, 5);
+    addItemToBackpack(ItemID::TORCH, 5);
 
     if (!mDodoTexture.loadFromFile("assets/Dodo.png")) {
         std::cerr << "Error: Missing Dodos" << std::endl;
@@ -126,6 +214,44 @@ Game::Game()
         // If the image is too small or too large, you can adjust the scale here:
         mWheelSprite.setScale(2.0f, 2.0f);
     }
+
+    // --- MAIN MENU TEXTS ---
+    mMenuTitleText.setFont(mFont);
+    mMenuTitleText.setString("TERRAFORGE");
+    mMenuTitleText.setCharacterSize(120);
+    mMenuTitleText.setFillColor(sf::Color::Yellow);
+    mMenuTitleText.setOutlineColor(sf::Color::Black);
+    mMenuTitleText.setOutlineThickness(6.0f);
+    sf::FloatRect titleBoundsMenu = mMenuTitleText.getLocalBounds();
+    mMenuTitleText.setOrigin(titleBoundsMenu.width / 2.0f, titleBoundsMenu.height / 2.0f);
+    mMenuTitleText.setPosition(1920 / 2.0f, 300.0f);
+
+    mMenuPlayText.setFont(mFont);
+    mMenuPlayText.setString("> PLAY <");
+    mMenuPlayText.setCharacterSize(60);
+    mMenuPlayText.setFillColor(sf::Color::White);
+    mMenuPlayText.setOutlineColor(sf::Color::Black);
+    mMenuPlayText.setOutlineThickness(3.0f);
+    sf::FloatRect playBounds = mMenuPlayText.getLocalBounds();
+    mMenuPlayText.setOrigin(playBounds.width / 2.0f, playBounds.height / 2.0f);
+    mMenuPlayText.setPosition(1920 / 2.0f, 600.0f);
+
+    mMenuExitText.setFont(mFont);
+    mMenuExitText.setString("> EXIT <");
+    mMenuExitText.setCharacterSize(60);
+    mMenuExitText.setFillColor(sf::Color::White);
+    mMenuExitText.setOutlineColor(sf::Color::Black);
+    mMenuExitText.setOutlineThickness(3.0f);
+    sf::FloatRect exitBounds = mMenuExitText.getLocalBounds();
+    mMenuExitText.setOrigin(exitBounds.width / 2.0f, exitBounds.height / 2.0f);
+    mMenuExitText.setPosition(1920 / 2.0f, 750.0f);
+
+    // Pause Text
+    mPauseTitleText = mDeathTitleText; // Copy the style
+    mPauseTitleText.setString("PAUSED");
+    mPauseTitleText.setFillColor(sf::Color::White);
+    sf::FloatRect pauseBounds = mPauseTitleText.getLocalBounds();
+    mPauseTitleText.setOrigin(pauseBounds.width / 2.0f, pauseBounds.height / 2.0f);
 }
 
 Game::~Game() {
@@ -157,230 +283,169 @@ void Game::processEvents() {
     while (mWindow.pollEvent(event)) {
         if (event.type == sf::Event::Closed)
             mWindow.close();
-        if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape)
-            mWindow.close();
+        // --- 1. ESCAPE KEY LOGIC (IMPROVED) ---
+        if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape) {
+            if (mGameState == GameState::Playing) {
+                // If there are open menus, ESC closes them FIRST instead of pausing
+                if (mIsInventoryOpen || mIsFurnaceOpen || mIsChestOpen || mIsCraftingTableOpen) {
+                    mIsInventoryOpen = false;
+                    mIsFurnaceOpen = false;
+                    mIsChestOpen = false;
+                    mIsCraftingTableOpen = false;
 
-        // --- OPEN/CLOSE INVENTORY WITH 'E' ---
-        if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::E) {
-            mIsInventoryOpen = !mIsInventoryOpen;
-
-            // SAFETY: If we close the menu while dragging something, return it to the backpack
-            if (!mIsInventoryOpen && mDraggedItem.id != 0) {
-                addItemToBackpack(mDraggedItem.id, mDraggedItem.count);
-                mDraggedItem.id = 0;
-                mDraggedItem.count = 0;
+                    // If you had an object floating on the mouse, it returns to the backpack
+                    if (mDraggedItem.id != ItemID::AIR) {
+                        addItemToBackpack(mDraggedItem.id, mDraggedItem.count);
+                        mDraggedItem.id = ItemID::AIR;
+                        mDraggedItem.count = 0;
+                    }
+                } else {
+                    // If the screen is clean, we pause the game
+                    mGameState = GameState::Paused;
+                }
+            } else if (mGameState == GameState::Paused) {
+                mGameState = GameState::Playing; // Unpause
+            } else if (mGameState == GameState::MainMenu) {
+                mWindow.close(); // Exit from the main menu
             }
         }
 
-        // --- ADD THIS FOR RESIZE ---
-            if (event.type == sf::Event::Resized) {
-                // Update the view so graphics don't distort
-                sf::FloatRect visibleArea(0.0f, 0.0f, event.size.width, event.size.height);
-                mWindow.setView(sf::View(visibleArea));
+        // --- 2. CLICKS IN THE MAIN MENU ---
+        if (mGameState == GameState::MainMenu && event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
+            sf::Vector2i mousePos = sf::Mouse::getPosition(mWindow);
+            sf::Vector2f worldPos = mWindow.mapPixelToCoords(mousePos, mWindow.getDefaultView());
+
+            if (mMenuPlayText.getGlobalBounds().contains(worldPos)) mGameState = GameState::Playing;
+            if (mMenuExitText.getGlobalBounds().contains(worldPos)) mWindow.close();
+        }
+
+        // --- 3. CLICKS IN THE PAUSE MENU (NEW!) ---
+        if (mGameState == GameState::Paused && event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
+            sf::Vector2i mousePos = sf::Mouse::getPosition(mWindow);
+            sf::Vector2f worldPos = mWindow.mapPixelToCoords(mousePos, mWindow.getDefaultView());
+
+            // We simulate the collision box where we draw it in render() (Y = 650)
+            sf::FloatRect exitBounds = mMenuExitText.getGlobalBounds();
+            exitBounds.top = 650.0f - (exitBounds.height / 2.0f);
+
+            if (exitBounds.contains(worldPos)) {
+                mGameState = GameState::MainMenu; // Return to start
             }
+        }
 
-        // ==========================================================
-        // DRAG & DROP SYSTEM
-        // ==========================================================
-        if (mIsInventoryOpen) {
+        // --- OPEN/CLOSE INVENTORY (Key E) ---
+        if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::E) {
+            mIsInventoryOpen = !mIsInventoryOpen;
+            if (!mIsInventoryOpen) {
+                mIsChestOpen = false;
+                mIsFurnaceOpen = false;
+                mIsCraftingTableOpen = false;
 
-            // Variables to calculate where the slots are (Same as in render)
-            float slotSize = 48.0f;
-            float padding = 8.0f;
-            float startX = (mWindow.getSize().x / 2.0f) - ((10 * slotSize + 9 * padding) / 2.0f);
-            float startY = mWindow.getSize().y - (3 * slotSize + 2 * padding) - 50.0f;
-
-            float wheelCX = mWindow.getSize().x / 2.0f;
-            float wheelCY = mWindow.getSize().y / 2.0f - 100.0f;
-            float offset = 100.0f;
-            sf::Vector2f wheelPositions[4] = {
-                sf::Vector2f(0, -offset), sf::Vector2f(0, offset),
-                sf::Vector2f(-offset, 0), sf::Vector2f(offset, 0)
-            };
-            InventorySlot* wheelSlots[4] = { &mEquippedConsumable, &mEquippedBlock, &mEquippedSecondary, &mEquippedPrimary };
-
-            // ------------------------------------------------------
-            // 1. ON MOUSE PRESS: PICK UP ITEM
-            // ------------------------------------------------------
-            if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
-
-                // --- MAGIC COORDINATE TRANSLATION (2K/4K Mode) ---
-                sf::Vector2i pixelPos(event.mouseButton.x, event.mouseButton.y);
-
-                // Create a virtual camera that measures EXACTLY what the physical screen measures right now
-                sf::View uiView(sf::FloatRect(0.0f, 0.0f, mWindow.getSize().x, mWindow.getSize().y));
-                sf::Vector2f worldPos = mWindow.mapPixelToCoords(pixelPos, uiView);
-
-                float mx = worldPos.x;
-                float my = worldPos.y;
-                // ----------------------------------------------------
-                // ----------------------------------------
-
-                // A. Did we click on the Backpack?
-                for (int row = 0; row < 3; ++row) {
-                    for (int col = 0; col < 10; ++col) {
-                        float sx = startX + col * (slotSize + padding);
-                        float sy = startY + row * (slotSize + padding);
-
-                        // Slot hitbox
-                        if (mx >= sx && mx <= sx + slotSize && my >= sy && my <= sy + slotSize) {
-                            int index = row * 10 + col;
-                            if (mBackpack[index].id != 0) { // If there is something
-                                mDraggedItem = mBackpack[index]; // Stick it to the mouse
-                                mDragSourceType = 1; // Source: Backpack
-                                mBackpack[index].id = 0; // Empty the slot
-                                mBackpack[index].count = 0;
-                            }
-                        }
-                    }
-                }
-
-                // B. Did we click on the Tactical Wheel?
-                if (mDraggedItem.id == 0) {
-                    for (int i = 0; i < 4; ++i) {
-                        float sx = wheelCX + wheelPositions[i].x - 30.0f;
-                        float sy = wheelCY + wheelPositions[i].y - 30.0f;
-
-                        // 60x60 hitbox for wheel icons
-                        if (mx >= sx && mx <= sx + 60.0f && my >= sy && my <= sy + 60.0f) {
-                            if (wheelSlots[i]->id != 0) {
-                                mDraggedItem = *wheelSlots[i];
-                                mDragSourceType = 2; // Source: Wheel
-                                wheelSlots[i]->id = 0;
-                                wheelSlots[i]->count = 0;
-                            }
-                        }
-                    }
-                }
-
-                // C. Did we click on the Crafting Menu?
-                if (mDraggedItem.id == 0) { // Only allow crafting if mouse is empty
-                    float craftX = 50.0f;
-                    float craftY = 100.0f;
-                    float rowHeight = 60.0f;   // Altura de cada fila
-                    float panelWidth = 320.0f; // <--- ¡Panel mucho más ancho!
-
-                    for (size_t i = 0; i < mRecipes.size(); ++i) {
-                        float sx = craftX;
-                        float sy = craftY + i * rowHeight;
-
-                        // Si hacemos clic en cualquier parte de la fila ancha...
-                        if (mx >= sx && mx <= sx + panelWidth && my >= sy && my <= sy + rowHeight - 5.0f) {
-                            if (canCraft(mRecipes[i])) {
-                                craftItem(mRecipes[i]);
-                            }
-                        }
-                    }
+                if (mDraggedItem.id != ItemID::AIR) {
+                    addItemToBackpack(mDraggedItem.id, mDraggedItem.count);
+                    mDraggedItem.id = ItemID::AIR;
+                    mDraggedItem.count = 0;
                 }
             }
+        }
 
-            // ------------------------------------------------------
-            // 2. ON MOUSE RELEASE: DROP ITEM
-            // ------------------------------------------------------
-            if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left) {
-                if (mDraggedItem.id != 0) { // Only if we are holding something
+        if (event.type == sf::Event::Resized) {
+            sf::FloatRect visibleArea(0.0f, 0.0f, event.size.width, event.size.height);
+            mWindow.setView(sf::View(visibleArea));
+        }
 
-                    // --- MAGIC COORDINATE TRANSLATION (2K/4K Mode) ---
+        // ==========================================================
+        // DRAG & DROP SYSTEM (Now delegated to clean functions)
+        // ==========================================================
+        if (mGameState == GameState::Playing) {
+            if (mIsInventoryOpen) {
+                if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
                     sf::Vector2i pixelPos(event.mouseButton.x, event.mouseButton.y);
-
-                    // Create a virtual camera that measures EXACTLY what the physical screen measures right now
                     sf::View uiView(sf::FloatRect(0.0f, 0.0f, mWindow.getSize().x, mWindow.getSize().y));
                     sf::Vector2f worldPos = mWindow.mapPixelToCoords(pixelPos, uiView);
-
-                    float mx = worldPos.x;
-                    float my = worldPos.y;
-                    // ----------------------------------------------------
-                    // ----------------------------------------
-
-                    bool dropped = false;
-
-                    // A. Did we drop it in the Backpack?
-                    for (int row = 0; row < 3 && !dropped; ++row) {
-                        for (int col = 0; col < 10 && !dropped; ++col) {
-                            float sx = startX + col * (slotSize + padding);
-                            float sy = startY + row * (slotSize + padding);
-                            if (mx >= sx && mx <= sx + slotSize && my >= sy && my <= sy + slotSize) {
-                                int index = row * 10 + col;
-
-                                // MAGIC SWAP
-                                InventorySlot temp = mBackpack[index];
-                                mBackpack[index] = mDraggedItem;
-                                mDraggedItem = temp;
-                                dropped = true;
-                            }
-                        }
-                    }
-
-                    // B. Did we drop it in the Tactical Wheel?
-                    if (!dropped) {
-                        for (int i = 0; i < 4 && !dropped; ++i) {
-                            float sx = wheelCX + wheelPositions[i].x - 30.0f;
-                            float sy = wheelCY + wheelPositions[i].y - 30.0f;
-                            if (mx >= sx && mx <= sx + 60.0f && my >= sy && my <= sy + 60.0f) {
-
-                                // --- TACTICAL WHEEL RULES ---
-                                int dragID = mDraggedItem.id;
-                                bool allowed = false;
-
-                                if (i == 0) { // UP (Usable): Meat or Torches
-                                    if (dragID == 30 || dragID == 6) allowed = true;
-                                }
-                                // POR ESTO:
-                                else if (i == 1) { // DOWN (Blocks): Everything except pickaxes, meat and torches
-                                    if ((dragID >= 1 && dragID <= 5) || (dragID >= 7 && dragID <= 11) || dragID == 25) allowed = true;
-                                }
-                                else if (i == 2 || i == 3) { // SIDES (Weapons): Only Pickaxes
-                                    if (dragID >= 21 && dragID <= 24) allowed = true;
-                                }
-
-                                if (allowed) {
-                                    InventorySlot temp = *wheelSlots[i];
-                                    *wheelSlots[i] = mDraggedItem;
-                                    mDraggedItem = temp;
-                                    dropped = true;
-                                } else {
-                                    std::cout << "You cannot equip that item in this slot!" << std::endl;
-                                    // Will fall to case 'C'
-                                }
-                            }
-                        }
-                    }
-
-                    // C. If we drop it in the air...
-                    if (mDraggedItem.id != 0) {
-                        addItemToBackpack(mDraggedItem.id, mDraggedItem.count);
-                        mDraggedItem.id = 0;
-                        mDraggedItem.count = 0;
-                    }
+                    handleMouseClick(worldPos.x, worldPos.y);
+                }
+                else if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left) {
+                    sf::Vector2i pixelPos(event.mouseButton.x, event.mouseButton.y);
+                    sf::View uiView(sf::FloatRect(0.0f, 0.0f, mWindow.getSize().x, mWindow.getSize().y));
+                    sf::Vector2f worldPos = mWindow.mapPixelToCoords(pixelPos, uiView);
+                    handleMouseRelease(worldPos.x, worldPos.y);
                 }
             }
-        } // End if (mIsInventoryOpen)
-    } // End while(pollEvent)
-    mPlayer.handleInput(mIsInventoryOpen);
+        }
+    }
+    // Player movement and jump controls (ONLY IF PLAYING)
+    if (mGameState == GameState::Playing) {
+        mPlayer.handleInput(mIsInventoryOpen);
+    }
 }
 
 // Helper function to determine hardness
 float getBlockHardness(int id) {
     switch (id) {
-        case 0: return 0.0f;  // Air
-        case 1: return 0.2f;  // Dirt (Very fast)
-        case 2: return 0.25f; // Grass
-        case 4: return 0.6f;  // Wood
-        case 5: return 0.1f;  // Leaves (Instant)
-        case 6: return 0.1f;  // Torch
-        case 25: return 0.5f; // <--- ¡AÑADE LA PUERTA AQUÍ PARA PODER ROMPERLA!
+        case ItemID::AIR: return 0.0f;
+        case ItemID::DIRT: return 0.2f;  // (Very fast)
+        case ItemID::GRASS: return 0.25f;
+        case ItemID::WOOD: return 0.6f;
+        case ItemID::LEAVES: return 0.1f;  // (Instant)
+        case ItemID::TORCH: return 0.1f;
+
+            // --- DOORS (Closed and Open) ---
+        case ItemID::DOOR: case ItemID::DOOR_MID: case ItemID::DOOR_TOP:
+        case ItemID::DOOR_OPEN: case ItemID::DOOR_OPEN_MID: case ItemID::DOOR_OPEN_TOP:
+            return 0.5f;
+
+            // --- TABLES AND FURNACES ---
+        case ItemID::CRAFTING_TABLE: return 1.5f; // (Requires a few axe swings)
+        case ItemID::FURNACE: return 2.0f; // (Hard, it's made of stone)
+        case ItemID::CHEST: return 1.5f;
 
             // STONE AND MINERALS
-        case 3: return 1.0f;  // Stone (Standard)
-        case 7: return 1.2f;  // Coal
-        case 8: return 1.5f;  // Copper
-        case 9: return 2.0f;  // Iron
-        case 10: return 3.0f; // Cobalt (Hard)
-        case 11: return 5.0f; // Tungsten (Very hard)
+        case ItemID::STONE: return 1.0f;  // (Standard)
+        case ItemID::COAL: return 1.2f;
+        case ItemID::COPPER: return 1.5f;
+        case ItemID::IRON: return 2.0f;
+        case ItemID::COBALT: return 3.0f; // (Hard)
+        case ItemID::TUNGSTEN: return 5.0f; // (Very hard)
 
-        case 12: return -1.0f; // Bedrock (Indestructible)
+        case ItemID::BEDROCK: return -1.0f; // (Indestructible)
 
         default: return 1.0f;
+    }
+}
+
+// --- NEW: PROGRESSION SYSTEM (TIERS) ---
+// Returns the level of the pickaxe you have in your hand
+int getPickaxeTier(int itemID) {
+    switch (itemID) {
+        case ItemID::WOOD_PICKAXE: return 1;
+        case ItemID::STONE_PICKAXE: return 2;
+        case ItemID::IRON_PICKAXE: return 3;
+        case ItemID::TUNGSTEN_PICKAXE: return 4;
+        default: return 0; // Fists or other items
+    }
+}
+
+// Returns the MINIMUM level of pickaxe necessary to break a block
+int getRequiredPickaxeTier(int blockID) {
+    switch (blockID) {
+        // Level 1 Blocks (Require Wood Pickaxe or higher)
+        case ItemID::STONE:
+        case ItemID::COAL:
+        case ItemID::FURNACE: return 1;
+
+            // Level 2 Blocks (Require Stone Pickaxe or higher)
+        case ItemID::COPPER:
+        case ItemID::IRON: return 2;
+
+            // Level 3 Blocks (Require Iron Pickaxe or higher)
+        case ItemID::COBALT:
+        case ItemID::TUNGSTEN: return 3; // FIXED! Now Iron (Tier 3) can mine it
+
+        case ItemID::BEDROCK: return 999; // Impossible
+
+            // Dirt, wood, leaves, chests, tables, etc. can be broken with fists (Level 0)
+        default: return 0;
     }
 }
 
@@ -394,10 +459,116 @@ float getBlockHardness(int id) {
  * @param dt Delta time (time elapsed since last frame).
  */
 void Game::update(sf::Time dt) {
+    if (mGameState != GameState::Playing) return;
+    // Update day and night cycle
+    updateDayNightCycle(dt.asSeconds());
+    // ==================================================
+    // 1. DEATH LOGIC (BLOCKS THE REST OF THE GAME)
+    // ==================================================
+    if (mIsPlayerDead) {
+        mRespawnTimer -= dt.asSeconds();
+
+        // We update the countdown text
+        int secondsLeft = static_cast<int>(std::ceil(mRespawnTimer));
+        mDeathSubText.setString("Respawning in " + std::to_string(secondsLeft) + " seconds...");
+
+        // If the time runs out, we REVIVE
+        if (mRespawnTimer <= 0.0f) {
+            respawnPlayer();
+        }
+
+        return; // We exit the function
+    }
+
+
+    // ==================================================
+    // 2. CHECK IF WE JUST DIED
+    // ==================================================
+    if (mPlayer.getHp() <= 0) {
+        mIsPlayerDead = true;
+        mRespawnTimer = 5.0f; // 5 Seconds of waiting
+
+        // Penalty: You lose half of your meat!
+        int meatCount = getItemCount(50);
+        if (meatCount > 0) {
+            int meatToLose = meatCount / 2;
+            if (meatToLose > 0) {
+                consumeItem(50, meatToLose);
+                std::cout << "You died and lost " << meatToLose << " pieces of meat..." << std::endl;
+            }
+        }
+
+        // Dramatic death sound
+        mSndBreak.setPitch(0.4f);
+        mSndBreak.play();
+
+        return; // We exit so the player stops moving and falls to the ground
+    }
+
+    // ==================================================
+    // 2. FURNACE LOGIC (MULTIPLE FURNACES)
+    // ==================================================
+    for (auto& pair : mActiveFurnaces) {
+        FurnaceData& fd = pair.second;
+
+        // 1. What mineral are we trying to smelt?
+        int resultItem = 0;
+        if (fd.input.id == ItemID::COPPER) resultItem = ItemID::COPPER_INGOT;
+        else if (fd.input.id == ItemID::IRON) resultItem = ItemID::IRON_INGOT;
+        else if (fd.input.id == ItemID::COBALT) resultItem = ItemID::COBALT_INGOT;
+        else if (fd.input.id == ItemID::TUNGSTEN) resultItem = ItemID::TUNGSTEN_INGOT;
+
+        // Can we cook? (There is mineral, and the output is empty or has space for the same ingot)
+        bool canCook = (resultItem != 0 && fd.input.count > 0 &&
+                       (fd.output.id == 0 || (fd.output.id == resultItem && fd.output.count < 99)));
+
+        // 2. Fuel Consumption Logic (Wood or Coal)
+        if (canCook && fd.fuelTimer <= 0.0f) {
+            // We accept Wood or Coal
+            if ((fd.fuel.id == ItemID::WOOD || fd.fuel.id == ItemID::COAL) && fd.fuel.count > 0) {
+                int fuelType = fd.fuel.id;
+
+                fd.fuel.count--;
+                if (fd.fuel.count == 0) fd.fuel.id = 0;
+
+                // Coal lasts 40 seconds, wood only 10
+                fd.maxFuelTimer = (fuelType == ItemID::COAL) ? 40.0f : 10.0f;
+                fd.fuelTimer = fd.maxFuelTimer;
+            }
+        }
+
+        // 3. Smelting Process
+        if (fd.fuelTimer > 0.0f) {
+            fd.fuelTimer -= dt.asSeconds();
+            if (fd.fuelTimer < 0.0f) fd.fuelTimer = 0.0f;
+
+            if (canCook) {
+                fd.smeltTimer += dt.asSeconds();
+
+                if (fd.smeltTimer >= SMELT_TIME) {
+                    fd.input.count--;
+                    if (fd.input.count == 0) fd.input.id = 0;
+
+                    fd.output.id = resultItem;
+                    fd.output.count++;
+                    fd.smeltTimer = 0.0f;
+                }
+            } else {
+                fd.smeltTimer = 0.0f; // It pauses if you take out the mineral
+            }
+        } else {
+            fd.smeltTimer = 0.0f; // It pauses if the fire goes out
+        }
+    }
+
     mPlayer.update(dt, mWorld);
+
+    // We recalculate the weight constantly to avoid bugs
+    calculateTotalWeight();
     mPlayer.setOverweight(mCurrentWeight > mMaxWeight);
-    // Le pasamos al jugador el ID del objeto que tiene equipado en la mano derecha
-    mPlayer.setEquippedWeapon(mEquippedPrimary.id);
+
+    // We pass the ID of the item equipped in the right hand to the player
+    mPlayer.setEquippedWeapon(mSelectedBlock);
 
     // --- UPDATE WORLD ITEMS ---
     // 1. Create a temporary inventory for this frame
@@ -488,96 +659,182 @@ void Game::update(sf::Time dt) {
     float maxRange = 180.0f;
 
     // ==================================================
-    // 1. SISTEMA DE COMBATE (Depende de la Animación)
+    // 1. COMBAT SYSTEM (Depends on Animation)
     // ==================================================
-    // Se ejecuta automáticamente en el fotograma 'Active' del ataque,
-    // ¡independientemente de si el ratón sigue pulsado o no!
+    // It runs automatically in the 'Active' frame of the attack,
+    // regardless of whether the mouse is still pressed or not!
     if (mPlayer.canDealDamage()) {
 
-        // 1. Calcular Daño del Arma (Según tu inventario)
-        int toolDamage = 1; // Puños
-        int equippedID = mEquippedPrimary.id; // Suponiendo que el arma está en la primaria
-        if (equippedID == 21) toolDamage = 3;
-        if (equippedID == 22) toolDamage = 5;
-        if (equippedID == 23) toolDamage = 10;
-        if (equippedID == 24) toolDamage = 20;
+        // 1. Calculate Weapon Damage (Based on your inventory)
+        int toolDamage = 1; // Fists
+        int equippedID = mSelectedBlock;
+
+        // Pickaxe Damage (Lower, they are not for fighting)
+        if (equippedID == ItemID::WOOD_PICKAXE) toolDamage = 3;
+        if (equippedID == ItemID::STONE_PICKAXE) toolDamage = 5;
+        if (equippedID == ItemID::IRON_PICKAXE) toolDamage = 8;
+        if (equippedID == ItemID::TUNGSTEN_PICKAXE) toolDamage = 12;
+
+        // Sword Damage (Designed for killing)
+        if (equippedID == ItemID::WOOD_SWORD) toolDamage = 6;
+        if (equippedID == ItemID::STONE_SWORD) toolDamage = 10;
+        if (equippedID == ItemID::IRON_SWORD) toolDamage = 18;
+        if (equippedID == ItemID::TUNGSTEN_SWORD) toolDamage = 30;
 
         sf::FloatRect attackHitbox = mPlayer.getWeaponHitbox();
 
         for (auto& mob : mMobs) {
-            // Si la hitbox del hachazo toca al monstruo
+            // If the axe hitbox touches the monster
             if (attackHitbox.intersects(mob->getBounds())) {
 
                 float dir = (mPlayer.getPosition().x < mob->getPosition().x) ? 1.0f : -1.0f;
 
-                // Aplicamos daño. Si el bicho recibe el golpe, suena
+                // We apply damage. If the bug receives the hit, it sounds
                 if (mob->takeDamage(toolDamage, dir)) {
                     mSndHit.setPitch(1.0f + (rand() % 40) / 100.0f);
                     mSndHit.play();
+                    // --- BLOOD EFFECT ---
+                    // We use MEAT so that it outputs red particles
+                    spawnParticles(mob->getBounds().getPosition() + sf::Vector2f(mob->getBounds().getSize().x / 2.0f, 0.0f), ItemID::MEAT, 8);
                 }
 
-                // Ponemos el seguro para no darle 60 veces en un segundo
+                // We put the safety catch so as not to hit it 60 times in a second
                 mPlayer.registerHit();
-                break; // Rompemos el bucle para dar solo a 1 enemigo por hachazo
+                break; // We break the loop to hit only 1 enemy per axe swing
             }
         }
     }
 
     // ==================================================
-    // 2. SISTEMA DE MINERÍA (Depende de mantener el Clic)
+    // 2. MINING SYSTEM (Depends on keeping the Click pressed)
     // ==================================================
     if (!mIsInventoryOpen) {
         if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
 
-            // --- ¡NUEVO! EL SEGURO DE DISTANCIA DE VUELTA ---
-            // Solo empezamos a picar si el ratón está lo suficientemente cerca
+            // --- NEW! DISTANCE SAFETY CATCH IS BACK ---
+            // We only start mining if the mouse is close enough
             if (distance <= maxRange) {
 
-                // ¿Hemos cambiado de bloque?
+                // Have we changed blocks?
                 if (mMiningPos.x != gridX || mMiningPos.y != gridY) {
                     mMiningTimer = 0.0f;
                     mMiningPos = sf::Vector2i(gridX, gridY);
 
+                    // When you left click on a block to start mining:
                     int blockID = mWorld.getBlock(gridX, gridY);
-                    mCurrentHardness = getBlockHardness(blockID);
+
+                    if (blockID != 0) {
+                        mMiningPos = sf::Vector2i(gridX, gridY);
+                        mMiningTimer = 0.0f;
+
+                        // --- NEW: DYNAMIC LOGGING SYSTEM ---
+                        if (blockID == ItemID::WOOD) { // If it's Wood
+                            int blocksAbove = 0;
+                            int checkY = gridY;
+
+                            // We count how many wood blocks or leaves are directly above
+                            while (mWorld.getBlock(gridX, checkY) == ItemID::WOOD || mWorld.getBlock(gridX, checkY) == ItemID::LEAVES) {
+                                blocksAbove++;
+                                checkY--; // We look up
+                            }
+
+                            // Each block adds 0.2s to the mining time (Base 0.6s)
+                            mCurrentHardness = 0.2f * blocksAbove;
+                            if (mCurrentHardness < 0.6f) mCurrentHardness = 0.6f;
+                        }
+                        else {
+                            // Normal hardness for the rest of the blocks
+                            mCurrentHardness = getBlockHardness(blockID); // Or however you have it programmed
+                        }
+                    }
                 }
 
-                // Minar
+                // Mine
                 if (mCurrentHardness > 0.0f) {
                     float miningSpeed = 1.0f;
-                    int equippedID = mEquippedPrimary.id;
-
-                    if (equippedID == 21) miningSpeed = 3.0f;
-                    if (equippedID == 22) miningSpeed = 5.0f;
-                    if (equippedID == 23) miningSpeed = 10.0f;
-                    if (equippedID == 24) miningSpeed = 20.0f;
-
+                    int equippedID = mSelectedBlock;
                     int targetID = mWorld.getBlock(gridX, gridY);
-                    bool isHardBlock = (targetID == 3 || (targetID >= 7 && targetID <= 11));
-                    bool holdingPickaxe = (equippedID >= 21 && equippedID <= 24);
 
-                    if (isHardBlock && !holdingPickaxe) {
+                    // 1. Check if our pickaxe has enough level
+                    int pickaxeTier = getPickaxeTier(equippedID);
+                    int requiredTier = getRequiredPickaxeTier(targetID);
+
+                    if (pickaxeTier < requiredTier) {
+                        // The pickaxe is not good enough for this material
                         miningSpeed = 0.0f;
+                    } else {
+                        // 2. If we can mine it, we apply the speed of our pickaxe
+                        if (equippedID == ItemID::WOOD_PICKAXE) miningSpeed = 3.0f;
+                        else if (equippedID == ItemID::STONE_PICKAXE) miningSpeed = 5.0f;
+                        else if (equippedID == ItemID::IRON_PICKAXE) miningSpeed = 10.0f;
+                        else if (equippedID == ItemID::TUNGSTEN_PICKAXE) miningSpeed = 20.0f;
+
+                        // --- NEW: SWORDS ARE BETTER THAN FISTS ---
+                        // Fists have a speed of 1.0f. We give swords 1.5f.
+                        else if (equippedID >= ItemID::WOOD_SWORD && equippedID <= ItemID::TUNGSTEN_SWORD) {
+                            miningSpeed = 1.5f;
+                        }
                     }
 
+                    // We add the progress (if miningSpeed is 0, the bar doesn't advance)
                     mMiningTimer += dt.asSeconds() * miningSpeed;
 
+                    // The block has been broken!
                     if (mMiningTimer >= mCurrentHardness) {
-                        mWorld.setBlock(gridX, gridY, 0);
+                        int brokenBlockID = mWorld.getBlock(mMiningPos.x, mMiningPos.y);
 
+                        // --- PARTICLE EXPLOSION! ---
+                        float tileSize = mWorld.getTileSize();
+                        sf::Vector2f blockCenter(mMiningPos.x * tileSize + tileSize/2.0f, mMiningPos.y * tileSize + tileSize/2.0f);
+                        spawnParticles(blockCenter, brokenBlockID, 12); // Shoots 12 particles
+
+                        // --- NEW: TREE DOMINO EFFECT ---
+                        if (brokenBlockID == ItemID::WOOD) { // If we just broke Wood
+                            int currY = mMiningPos.y;
+
+                            // While the current block is wood or leaves...
+                            while (mWorld.getBlock(mMiningPos.x, currY) == ItemID::WOOD ||
+                                   mWorld.getBlock(mMiningPos.x, currY) == ItemID::LEAVES) {
+
+                                int currentBlock = mWorld.getBlock(mMiningPos.x, currY);
+
+                                // 1. Break the central block (Trunk or leaf)
+                                mWorld.setBlock(mMiningPos.x, currY, 0);
+
+                                // --- DROP THE ITEM IN THE WORLD ---
+                                // We use your native function that already does the physical jumps
+                                mWorld.spawnItem(mMiningPos.x, currY, currentBlock);
+
+                                // 2. Clear the surrounding leaves (3x3 Radius)
+                                for(int ox = -2; ox <= 2; ++ox) {
+                                    for(int oy = -2; oy <= 2; ++oy) {
+                                        if(mWorld.getBlock(mMiningPos.x + ox, currY + oy) == ItemID::LEAVES) { // If it's a leaf
+                                            mWorld.setBlock(mMiningPos.x + ox, currY + oy, 0);
+                                            // 15% chance to drop extra leaves (simulating sprouts/saplings)
+                                            if (rand() % 100 < 15) mWorld.spawnItem(mMiningPos.x + ox, currY + oy, ItemID::LEAVES);
+                                        }
+                                    }
+                                }
+
+                                // We go up a level to destroy the next block
+                                currY--;
+                            }
+                        }
+                        else {
+                            // Normal behavior for Stone, Dirt, etc.
+                            mWorld.setBlock(mMiningPos.x, mMiningPos.y, 0);
+
+                            // We drop the item to the ground using your native function
+                            mWorld.spawnItem(mMiningPos.x, mMiningPos.y, brokenBlockID);
+                        }
+
+                        // We add a sound for when it breaks
                         mSndBreak.setPitch(0.8f + (rand() % 40) / 100.0f);
                         mSndBreak.play();
 
-                        mMiningTimer = 0.0f;
+                        // We reset the mining
                         mCurrentHardness = 0.0f;
-                    }
-                    else {
-                        mSoundTimer += dt.asSeconds();
-                        if (mSoundTimer >= 0.25f && miningSpeed > 0.0f) {
-                            mSndHit.setPitch(0.9f + (rand() % 20) / 100.0f);
-                            mSndHit.play();
-                            mSoundTimer = 0.0f;
-                        }
+                        mMiningTimer = 0.0f;
                     }
                 }
                 else if (mCurrentHardness == -1.0f) {
@@ -585,14 +842,14 @@ void Game::update(sf::Time dt) {
                 }
 
             } else {
-                // Si mantenemos pulsado pero el ratón está MUY LEJOS, reseteamos la minería
+                // If we keep pressed but the mouse is VERY FAR, we reset the mining
                 mMiningTimer = 0.0f;
                 mMiningPos = sf::Vector2i(-1, -1);
             }
 
         }
         else {
-            // Botón izquierdo soltado: Resetear minería
+            // Left button released: Reset mining
             mMiningTimer = 0.0f;
             mMiningPos = sf::Vector2i(-1, -1);
         }
@@ -613,12 +870,18 @@ void Game::update(sf::Time dt) {
         // We can ONLY perform an action if the timer has reached 0
         if (mActionTimer <= 0.0f) {
 
-            // --- 1. IS IT FOOD? (ID 30 = Meat) ---
-            if (mSelectedBlock == 30) {
+            // --- 0. TRY TO INTERACT FIRST ---
+            // If the function returns 'true', it's because we've opened a furnace or a door.
+            // If so, we don't eat or place blocks.
+            if (interactWithBlock(gridX, gridY)) {
+                mActionTimer = 0.3f; // Pause so as not to open and close the door at the speed of light
+            }
+            // --- 1. IF THERE WAS NO INTERACTION, IS IT FOOD? ---
+            else if (mSelectedBlock == ItemID::MEAT) {
                 if (mPlayer.getHp() < mPlayer.getMaxHp() && wheel[mActiveWheelSlot]->count > 0) {
 
                     wheel[mActiveWheelSlot]->count--; // Spend from the wheel
-                    if (wheel[mActiveWheelSlot]->count == 0) wheel[mActiveWheelSlot]->id = 0; // If it runs out, clear the slot
+                    if (wheel[mActiveWheelSlot]->count == 0) wheel[mActiveWheelSlot]->id = 0;
 
                     mPlayer.heal(20);
                     mSndBuild.setPitch(0.5f);
@@ -626,86 +889,75 @@ void Game::update(sf::Time dt) {
                     mActionTimer = 0.25f;
                 }
             }
-            // --- 2. IF NOT FOOD, BUILD A BLOCK ---
             else if (distance <= maxRange) {
+                bool isPlaceableBlock = ((mSelectedBlock >= ItemID::DIRT && mSelectedBlock <= ItemID::TUNGSTEN) ||
+                                          mSelectedBlock == ItemID::DOOR || mSelectedBlock == ItemID::CRAFTING_TABLE ||
+                                          mSelectedBlock == ItemID::FURNACE || mSelectedBlock == ItemID::CHEST);
 
-                bool isPlaceableBlock = (mSelectedBlock >= 1 && mSelectedBlock <= 11 || mSelectedBlock == 25);
+                // We check if there is any block touching in a cross shape
+                bool hasAdjacentBlock = (mWorld.getBlock(gridX - 1, gridY) != 0) ||
+                                        (mWorld.getBlock(gridX + 1, gridY) != 0) ||
+                                        (mWorld.getBlock(gridX, gridY - 1) != 0) ||
+                                        (mWorld.getBlock(gridX, gridY + 1) != 0);
 
-                if (isPlaceableBlock && mWorld.getBlock(gridX, gridY) == 0) {
-                    sf::FloatRect blockRect(gridX * tileSize, gridY * tileSize, tileSize, tileSize);
+                if (isPlaceableBlock && wheel[mActiveWheelSlot]->count > 0) {
 
-                    if (!mPlayer.getGlobalBounds().intersects(blockRect)) {
-                        bool isMobInWay = false;
-                        for (auto& mob : mMobs) {
-                            if (mob->getBounds().intersects(blockRect)) {
-                                isMobInWay = true;
-                                break;
-                            }
-                        }
+                    // =======================================
+                    // SPECIAL CASE: PLACE DOOR (ID 25)
+                    // =======================================
+                    // =======================================
+                    // SPECIAL CASE: PLACE DOOR
+                    // =======================================
+                    if (mSelectedBlock == ItemID::DOOR) {
+                        if (mWorld.getBlock(gridX, gridY) == ItemID::AIR &&
+                            mWorld.getBlock(gridX, gridY - 1) == ItemID::AIR &&
+                            mWorld.getBlock(gridX, gridY - 2) == ItemID::AIR &&
+                            World::isSolid(mWorld.getBlock(gridX, gridY + 1)))
+                        {
+                            mWorld.setBlock(gridX, gridY, ItemID::DOOR);     // Down
+                            mWorld.setBlock(gridX, gridY - 1, ItemID::DOOR_MID); // Middle
+                            mWorld.setBlock(gridX, gridY - 2, ItemID::DOOR_TOP); // Up
 
-                        if (!isMobInWay && wheel[mActiveWheelSlot]->count > 0) {
-                            mWorld.setBlock(gridX, gridY, mSelectedBlock);
-
-                            wheel[mActiveWheelSlot]->count--; // Spend the block from the wheel
+                            wheel[mActiveWheelSlot]->count--;
                             if (wheel[mActiveWheelSlot]->count == 0) wheel[mActiveWheelSlot]->id = 0;
 
                             mSndBuild.setPitch(1.0f + (rand() % 20) / 100.0f);
                             mSndBuild.play();
                             mActionTimer = 0.15f;
-
                             calculateTotalWeight();
+                        }
+                    }
+                    // =======================================
+                    // NORMAL CASE: ANY OTHER BLOCK
+                    // =======================================
+                    else if (mWorld.getBlock(gridX, gridY) == 0 && hasAdjacentBlock) {
+                        sf::FloatRect blockRect(gridX * tileSize, gridY * tileSize, tileSize, tileSize);
+
+                        if (!mPlayer.getGlobalBounds().intersects(blockRect)) {
+                            bool isMobInWay = false;
+                            for (auto& mob : mMobs) {
+                                if (mob->getBounds().intersects(blockRect)) {
+                                    isMobInWay = true; break;
+                                }
+                            }
+
+                            if (!isMobInWay) {
+                                mWorld.setBlock(gridX, gridY, mSelectedBlock);
+
+                                wheel[mActiveWheelSlot]->count--;
+                                if (wheel[mActiveWheelSlot]->count == 0) wheel[mActiveWheelSlot]->id = 0;
+
+                                mSndBuild.setPitch(1.0f + (rand() % 20) / 100.0f);
+                                mSndBuild.play();
+                                mActionTimer = 0.15f;
+                                calculateTotalWeight();
+                            }
                         }
                     }
                 }
             }
         }// End of timer check
     }
-
-    // --------------------------------------------------
-    // DAY / NIGHT CYCLE LOGIC
-    // --------------------------------------------------
-    mGameTime += dt.asSeconds() * 0.5f;
-    // ==========================================
-    // DAY AND NIGHT CYCLE SYSTEM
-    // ==========================================
-    float dayLength = 120.0f; // A full day lasts 2 real minutes
-    if (mGameTime > dayLength) {
-        mGameTime = 0.0f; // Restart the cycle when reaching the end
-    }
-
-    int lightLevel = 255; // Default, full light (Day)
-
-    // We are going to divide the 120 seconds into phases:
-    if (mGameTime > 60.0f && mGameTime < 80.0f) {
-        // SUNSET (From 60 to 80 sec): Gradually darken
-        float progress = (mGameTime - 60.0f) / 20.0f; // Goes from 0.0 to 1.0
-        lightLevel = 255 - static_cast<int>(progress * 200); // Drops from 255 to 55
-    }
-    else if (mGameTime >= 80.0f && mGameTime < 100.0f) {
-        // DARK NIGHT (From 80 to 100 sec)
-        lightLevel = 55;
-    }
-    else if (mGameTime >= 100.0f && mGameTime <= 120.0f) {
-        // SUNRISE (From 100 to 120 sec): Gradually lighten
-        float progress = (mGameTime - 100.0f) / 20.0f; // Goes from 0.0 to 1.0
-        lightLevel = 55 + static_cast<int>(progress * 200); // Rises from 55 to 255
-    }
-
-    // Give the night a slightly bluish tint to make it look nicer
-    int blueLevel = std::min(255, lightLevel + 40);
-    mAmbientLight = sf::Color(lightLevel, lightLevel, blueLevel);
-
-    float cycle = std::sin(mGameTime);
-    float brightness = (cycle * 0.4f) + 0.6f;
-
-    sf::Uint8 r = static_cast<sf::Uint8>(255 * brightness);
-    sf::Uint8 g = static_cast<sf::Uint8>(255 * brightness);
-    sf::Uint8 b = static_cast<sf::Uint8>(255 * brightness);
-
-    if (brightness < 0.5f) {
-        b = static_cast<sf::Uint8>(std::min(255, b + 40));
-    }
-    mAmbientLight = sf::Color(r, g, b);
 
     // --------------------------------------------------
     // SAVE SYSTEM (F5 / F6)
@@ -791,6 +1043,10 @@ void Game::update(sf::Time dt) {
             }
         }
     }
+
+    float cycle = std::sin(mGameTime);
+    float brightness = (cycle * 0.4f) + 0.6f;
+
     for (auto it = mMobs.begin(); it != mMobs.end(); ) {
 
         auto& mob = **it; // Extract the object to make it easier to read
@@ -810,7 +1066,7 @@ void Game::update(sf::Time dt) {
 
         // --- REMOVE CORPSES ---
         if (mob.isDead()) {
-            mWorld.spawnItem(30, mob.getPosition()); // Drops meat
+            mWorld.spawnItem(50, mob.getPosition()); // Drops meat
             mSndBreak.setPitch(1.5f);
             mSndBreak.play();
             it = mMobs.erase(it); // Automatically deleted from memory
@@ -819,31 +1075,19 @@ void Game::update(sf::Time dt) {
         }
     }
 
-    // --------------------------------------------------
-    // DEATH AND RESPAWN SYSTEM
-    // --------------------------------------------------
-    if (mPlayer.getHp() <= 0) {
-        std::cout << "YOU DIED! Respawning..." << std::endl;
+    // ==================================================
+    // UPDATE PARTICLES (Gravity and Death)
+    // ==================================================
+    for (auto it = mParticles.begin(); it != mParticles.end(); ) {
+        it->velocity.y += 1200.0f * dt.asSeconds(); // Gravity Force
+        it->position += it->velocity * dt.asSeconds();
+        it->lifetime -= dt.asSeconds();
 
-        // 1. Heal to max
-        mPlayer.heal(mPlayer.getMaxHp());
-
-        // 2. Teleport to start (High in the sky to fall safely to the ground)
-        mPlayer.setPosition(sf::Vector2f(100.0f, -500.0f));
-
-        // 3. Classic penalty: You lose half your food (ID 30)!
-        int meatCount = getItemCount(30); // Count how much meat you have in the entire backpack
-        if (meatCount > 0) {
-            int meatToLose = meatCount / 2;
-            if (meatToLose > 0) {
-                consumeItem(30, meatToLose); // Delete that half from the backpack
-                std::cout << "You lost " << meatToLose << " pieces of meat..." << std::endl;
-            }
+        if (it->lifetime <= 0.0f) {
+            it = mParticles.erase(it); // It disintegrates
+        } else {
+            ++it;
         }
-
-        // Dramatic death sound
-        mSndBreak.setPitch(0.4f);
-        mSndBreak.play();
     }
 }
 
@@ -855,456 +1099,147 @@ void Game::update(sf::Time dt) {
  * Draws the sky, world, player, entities, UI (inventory, health bar), and other visual elements.
  */
 void Game::render() {
-    mWindow.clear(sf::Color(135, 206, 235));
+    mWindow.clear(mAmbientLight);
 
-    // 1. DRAW SKY
-    mSkySprite.setColor(mAmbientLight);
-    mWindow.draw(mSkySprite);
-
-    // 2. DRAW WORLD AND PLAYER
-    // Here the camera is focusing on the world correctly
-    mWorld.render(mWindow, mAmbientLight);
-    mPlayer.render(mWindow, mAmbientLight);
-
-    // DRAW ALL CREATURES
-    for (auto& mob : mMobs) {
-        mob->render(mWindow, mAmbientLight);
+    if (mGameState == GameState::MainMenu) {
+        // DRAW MAIN MENU
+        mWindow.setView(mWindow.getDefaultView());
+        mSkySprite.setColor(sf::Color::White); // Clear sky in background
+        mWindow.draw(mSkySprite);
+        mWindow.draw(mMenuTitleText);
+        mWindow.draw(mMenuPlayText);
+        mWindow.draw(mMenuExitText);
     }
-
-    // ==========================================
-    // PIXELATED LIGHT HALOS (DIAMONDS)
-    // ==========================================
-    float px = mPlayer.getPosition().x;
-    float py = mPlayer.getPosition().y;
-    float tileSize = mWorld.getTileSize();
-
-    int centerGridX = static_cast<int>(px / tileSize);
-    int centerGridY = static_cast<int>(py / tileSize);
-
-    // --- DIAMOND CONFIGURATION ---
-    // We use squares instead of circles for a more "pixelated" look
-
-    // 1. Outer Halo (Large, soft orange)
-    float outerSize = 300.0f;
-    sf::RectangleShape lightHalo(sf::Vector2f(outerSize, outerSize));
-    lightHalo.setOrigin(outerSize / 2.0f, outerSize / 2.0f); // Pivot to center
-    lightHalo.setRotation(45.0f); // The trick! Rotate it to be a diamond
-    lightHalo.setFillColor(sf::Color(255, 100, 20, 15)); // Warm color, very transparent
-
-    // 2. Middle Halo (Medium, fire orange)
-    float midSize = 180.0f;
-    sf::RectangleShape midHalo(sf::Vector2f(midSize, midSize));
-    midHalo.setOrigin(midSize / 2.0f, midSize / 2.0f);
-    midHalo.setRotation(45.0f);
-    midHalo.setFillColor(sf::Color(255, 160, 40, 25));
-
-    // 3. Core Halo (Small, bright yellow, the "flame")
-    float coreSize = 60.0f;
-    sf::RectangleShape coreHalo(sf::Vector2f(coreSize, coreSize));
-    coreHalo.setOrigin(coreSize / 2.0f, coreSize / 2.0f);
-    coreHalo.setRotation(45.0f);
-    coreHalo.setFillColor(sf::Color(255, 255, 150, 40));
-
-    // --- DRAW LOOP ---
-    for (int x = centerGridX - 20; x <= centerGridX + 20; ++x) {
-        for (int y = centerGridY - 20; y <= centerGridY + 20; ++y) {
-
-            if (mWorld.getBlock(x, y) == 6) {
-                // Center position of the torch block
-                sf::Vector2f lightPos((x * tileSize) + (tileSize / 2.0f),
-                                      (y * tileSize) + (tileSize / 2.0f));
-
-                // Draw the 3 layers with BlendAdd
-                lightHalo.setPosition(lightPos);
-                mWindow.draw(lightHalo, sf::BlendAdd);
-
-                midHalo.setPosition(lightPos);
-                mWindow.draw(midHalo, sf::BlendAdd);
-
-                coreHalo.setPosition(lightPos);
-                mWindow.draw(coreHalo, sf::BlendAdd);
-            }
-        }
-    }
-
-    // --------------------------------------------------
-    // DRAW MOUSE SELECTOR
-    // --------------------------------------------------
-    sf::Vector2i pixelPos = sf::Mouse::getPosition(mWindow);
-    sf::Vector2f worldPos = mWindow.mapPixelToCoords(pixelPos);
-    tileSize = mWorld.getTileSize();
-
-    int gridX = static_cast<int>(std::floor(worldPos.x / tileSize));
-    int gridY = static_cast<int>(std::floor(worldPos.y / tileSize));
-
-    float blockCenterX = (gridX * tileSize) + (tileSize / 2.0f);
-    float blockCenterY = (gridY * tileSize) + (tileSize / 2.0f);
-
-    sf::Vector2f playerCenter = mPlayer.getPosition();
-    float dx = blockCenterX - playerCenter.x;
-    float dy = blockCenterY - playerCenter.y;
-    float dist = std::sqrt(dx*dx + dy*dy);
-    float maxRange = 180.0f;
-
-    sf::RectangleShape selector(sf::Vector2f(tileSize, tileSize));
-    selector.setPosition(gridX * tileSize, gridY * tileSize);
-    selector.setFillColor(sf::Color::Transparent);
-    selector.setOutlineThickness(2.0f);
-
-    if (dist <= maxRange) {
-        selector.setOutlineColor(sf::Color(255, 255, 255, 150));
-    } else {
-        selector.setOutlineColor(sf::Color(255, 0, 0, 150));
-    }
-    mWindow.draw(selector);
-
-    // --------------------------------------------------
-    // DRAW MINING PROGRESS BAR (THIS IS THE CORRECT PLACE)
-    // --------------------------------------------------
-    // We put it here because the 'Game View' is still active.
-    // We don't need to do 'setView(view)' because we are already in that view.
-
-    if (mMiningTimer > 0.0f && mCurrentHardness > 0.0f) {
-
-        // Calculate percentage (0.0 to 1.0)
-        float percent = mMiningTimer / mCurrentHardness;
-        if (percent > 1.0f) percent = 1.0f;
-
-        // Bar background (Black)
-        sf::RectangleShape barBg(sf::Vector2f(tileSize * 0.8f, 6.0f));
-        barBg.setPosition(
-            mMiningPos.x * tileSize + tileSize * 0.1f,
-            mMiningPos.y * tileSize + tileSize * 0.1f // A little above the block
-        );
-        barBg.setFillColor(sf::Color::Black);
-        mWindow.draw(barBg);
-
-        // Bar fill (White)
-        sf::RectangleShape barFill(sf::Vector2f((tileSize * 0.8f) * percent, 4.0f));
-        barFill.setPosition(
-            barBg.getPosition().x + 1.0f, // 1px margin
-            barBg.getPosition().y + 1.0f
-        );
-        barFill.setFillColor(sf::Color::White);
-        mWindow.draw(barFill);
-    }
-
-    // --------------------------------------------------
-    // UI / HUD SYSTEM (ITEM IN HAND)
-    // --------------------------------------------------
-    mWindow.setView(mWindow.getDefaultView());
-
-    // Only draw the active item slot, to the right of the health bar
-    float uiX = 240.0f; // To the right of the red bar
-    float uiY = 70.0f;
-    float slotSize = 40.0f;
-
-    sf::RectangleShape activeSlotBg(sf::Vector2f(slotSize, slotSize));
-    activeSlotBg.setPosition(uiX, uiY);
-    activeSlotBg.setFillColor(sf::Color(0, 0, 0, 150));
-    activeSlotBg.setOutlineThickness(2.0f);
-    activeSlotBg.setOutlineColor(sf::Color::White); // Always white because it's active
-    mWindow.draw(activeSlotBg);
-
-    if (mSelectedBlock != 0) {
-        const sf::Texture* tex = mWorld.getTexture(mSelectedBlock);
-        if (tex != nullptr) {
-            sf::Sprite icon(*tex);
-            float scale = (slotSize - 10.0f) / tex->getSize().x;
-            icon.setScale(scale, scale);
-            icon.setPosition(uiX + 5.0f, uiY + 5.0f);
-            mWindow.draw(icon);
-
-            // Quantity (If it's a block or consumable)
-            InventorySlot* wheel[4] = { &mEquippedConsumable, &mEquippedBlock, &mEquippedSecondary, &mEquippedPrimary };
-            if (wheel[mActiveWheelSlot]->count > 0) {
-                mUiText.setString(std::to_string(wheel[mActiveWheelSlot]->count));
-                mUiText.setCharacterSize(14);
-                sf::FloatRect textBounds = mUiText.getLocalBounds();
-                mUiText.setPosition(uiX + slotSize - textBounds.width - 5.0f, uiY + slotSize - textBounds.height - 8.0f);
-                mWindow.draw(mUiText);
-            }
-        }
-    }
-
-    // --------------------------------------------------
-    // DRAW HEALTH BAR (HUD)
-    // --------------------------------------------------
-    // Calculate health percentage (0.0 to 1.0)
-    float hpPercent = static_cast<float>(mPlayer.getHp()) / mPlayer.getMaxHp();
-
-    // Position: Below inventory (X: 20, Y: 80)
-    float barX = 20.0f;
-    float barY = 80.0f;
-    float barWidth = 200.0f;
-    float barHeight = 20.0f;
-
-    // 1. Background (Dark red)
-    sf::RectangleShape hpBg(sf::Vector2f(barWidth, barHeight));
-    hpBg.setPosition(barX, barY);
-    hpBg.setFillColor(sf::Color(100, 0, 0, 200));
-    hpBg.setOutlineThickness(2.0f);
-    hpBg.setOutlineColor(sf::Color::Black);
-    mWindow.draw(hpBg);
-
-    // 2. Bar fill (Bright red or Green)
-    sf::RectangleShape hpFill(sf::Vector2f(barWidth * hpPercent, barHeight));
-    hpFill.setPosition(barX, barY);
-    hpFill.setFillColor(sf::Color(255, 50, 50, 255)); // Bright red
-    mWindow.draw(hpFill);
-
-    // 3. (Optional) Health Text '50/100'
-    sf::Text hpText = mUiText; // Copy the font
-    hpText.setString(std::to_string(mPlayer.getHp()) + " / " + std::to_string(mPlayer.getMaxHp()));
-    hpText.setCharacterSize(14);
-    hpText.setPosition(barX + barWidth / 2.0f - 25.0f, barY); // Centered by eye
-    mWindow.draw(hpText);
-
-    // --------------------------------------------------
-    // FULL INVENTORY MENU (KEY 'E')
-    // --------------------------------------------------
-    // Use the all-terrain camera so the UI anchors perfectly to any monitor
-    sf::View uiView(sf::FloatRect(0.0f, 0.0f, mWindow.getSize().x, mWindow.getSize().y));
-    mWindow.setView(uiView);
-    if (mIsInventoryOpen) {
-        // 1. Darken the background to highlight the menu
-        sf::RectangleShape overlay(sf::Vector2f(mWindow.getSize().x, mWindow.getSize().y));
-        overlay.setFillColor(sf::Color(0, 0, 0, 150)); // Semi-transparent black
-        mWindow.draw(overlay);
-
-        float slotSize = 48.0f;
-        float padding = 8.0f;
+    else {
+        // 1. We clear the window with ambient light
+        mWindow.clear(mAmbientLight);
 
         // ==========================================
-        // A) THE BACKPACK 3x10 (Terraria Style)
+        // 1. LIGHT AND SKY CALCULATION (We keep your original logic)
         // ==========================================
-        // Calculate the bottom center of the screen
-        float startX = (mWindow.getSize().x / 2.0f) - ((10 * slotSize + 9 * padding) / 2.0f);
-        float startY = mWindow.getSize().y - (3 * slotSize + 2 * padding) - 50.0f;
+        sf::Color skyLight = mAmbientLight;
+        sf::Vector2f centerPos = mPlayer.getCenter();
+        int pGridX = static_cast<int>(centerPos.x / mWorld.getTileSize());
+        int pGridY = static_cast<int>(centerPos.y / mWorld.getTileSize());
 
-        for (int row = 0; row < 3; ++row) {
-            for (int col = 0; col < 10; ++col) {
-                int index = row * 10 + col; // Index from 0 to 29
+        float accumulatedSurfaceY = 0.0f;
+        int columnsChecked = 0;
+        int range = 10;
 
-                sf::RectangleShape slotBg(sf::Vector2f(slotSize, slotSize));
-                slotBg.setPosition(startX + col * (slotSize + padding), startY + row * (slotSize + padding));
-                slotBg.setFillColor(sf::Color(40, 40, 40, 200));
-                slotBg.setOutlineThickness(2.0f);
-                slotBg.setOutlineColor(sf::Color(100, 100, 100));
-                mWindow.draw(slotBg);
+        for (int x = pGridX - range; x <= pGridX + range; ++x) {
+            for (int y = 0; y < WORLD_HEIGHT; ++y) {
+                if (mWorld.getBlock(x, y) != 0) {
+                    accumulatedSurfaceY += y;
+                    columnsChecked++;
+                    break;
+                }
+            }
+        }
 
-                // Draw the item if there is something in this slot
-                if (mBackpack[index].id != 0) {
-                    const sf::Texture* tex = mWorld.getTexture(mBackpack[index].id);
-                    if (tex) {
-                        sf::Sprite icon(*tex);
-                        float scale = (slotSize - 10.0f) / tex->getSize().x;
-                        icon.setScale(scale, scale);
-                        icon.setPosition(slotBg.getPosition().x + 5.0f, slotBg.getPosition().y + 5.0f);
-                        mWindow.draw(icon);
+        float averageSurfaceY = (columnsChecked > 0) ? (accumulatedSurfaceY / columnsChecked) : pGridY;
+        float depth = pGridY - averageSurfaceY;
+        float caveFactor = (depth > 0) ? std::min(depth / 20.0f, 1.0f) : 0.0f;
 
-                        // Draw quantity
-                        mUiText.setString(std::to_string(mBackpack[index].count));
-                        mUiText.setCharacterSize(14);
-                        sf::FloatRect textBounds = mUiText.getLocalBounds();
-                        mUiText.setPosition(
-                            slotBg.getPosition().x + slotSize - textBounds.width - 4.0f,
-                            slotBg.getPosition().y + slotSize - textBounds.height - 6.0f
-                        );
-                        mWindow.draw(mUiText);
+        sf::Uint8 r = static_cast<sf::Uint8>(std::max(5.0f, skyLight.r * (1.0f - caveFactor)));
+        sf::Uint8 g = static_cast<sf::Uint8>(std::max(5.0f, skyLight.g * (1.0f - caveFactor)));
+        sf::Uint8 b = static_cast<sf::Uint8>(std::max(5.0f, skyLight.b * (1.0f - caveFactor)));
+        sf::Color finalAmbient(r, g, b);
+
+        // DRAW SKY
+        sf::View currentView = mWindow.getView();
+        mSkySprite.setPosition(currentView.getCenter().x - currentView.getSize().x / 2.0f,
+                               currentView.getCenter().y - currentView.getSize().y / 2.0f);
+        if (mSkyTexture.getSize().x > 0) {
+            mSkySprite.setScale(currentView.getSize().x / mSkyTexture.getSize().x,
+                                currentView.getSize().y / mSkyTexture.getSize().y);
+        }
+        mSkySprite.setColor(skyLight);
+        mWindow.draw(mSkySprite);
+
+        // PLAYER LIGHT (Torches)
+        sf::Color playerColor = finalAmbient;
+        sf::Vector2f playerPos = mPlayer.getCenter();
+        float searchRadius = 10.0f;
+        float lightRadius = 250.0f;
+        float maxTorchIntensity = 0.0f;
+
+        for (int x = pGridX - searchRadius; x <= pGridX + searchRadius; ++x) {
+            for (int y = pGridY - searchRadius; y <= pGridY + searchRadius; ++y) {
+                if (mWorld.getBlock(x, y) == ItemID::TORCH) { // Using your new Enum!
+                    float torchX = x * mWorld.getTileSize() + mWorld.getTileSize()/2.0f;
+                    float torchY = y * mWorld.getTileSize() + mWorld.getTileSize()/2.0f;
+                    float dist = std::sqrt(std::pow(playerPos.x - torchX, 2) + std::pow(playerPos.y - torchY, 2));
+                    if (dist < lightRadius) {
+                        maxTorchIntensity = std::max(maxTorchIntensity, 1.0f - (dist / lightRadius));
                     }
                 }
             }
         }
 
+        float baseR = std::max(playerColor.r / 255.0f, maxTorchIntensity);
+        float baseG = std::max(playerColor.g / 255.0f, maxTorchIntensity);
+        float baseB = std::max(playerColor.b / 255.0f, maxTorchIntensity);
+        playerColor.r = static_cast<sf::Uint8>(std::min(255.0f, baseR * 255.0f));
+        playerColor.g = static_cast<sf::Uint8>(std::min(255.0f, baseG * 255.0f));
+        playerColor.b = static_cast<sf::Uint8>(std::min(255.0f, baseB * 255.0f));
+
         // ==========================================
-        // B) THE TACTICAL WHEEL (With your Sprite)
+        // 2. DRAW WORLD AND ENTITIES
         // ==========================================
-        float wheelCX = mWindow.getSize().x / 2.0f;
-        float wheelCY = mWindow.getSize().y / 2.0f - 100.0f;
+        mWorld.render(mWindow, finalAmbient);
+        mPlayer.render(mWindow, playerColor);
 
-        // Draw the ring
-        mWheelSprite.setPosition(wheelCX, wheelCY);
-        mWindow.draw(mWheelSprite);
+        for (auto& mob : mMobs) {
+            mob->render(mWindow, finalAmbient);
+        }
 
-        // Create a quick list with the 4 tactical slots to draw them easily
-        // Order: 0=Up(Usable), 1=Down(Block), 2=Left(Weapon2), 3=Right(Weapon1)
-        InventorySlot* wheelSlots[4] = { &mEquippedConsumable, &mEquippedBlock, &mEquippedSecondary, &mEquippedPrimary };
-
-        // Relative positions where the ICONS will go with respect to the center of the wheel
-        float offset = 100.0f; // The center of the blue ring
-        sf::Vector2f wheelPositions[4] = {
-            sf::Vector2f(0, -offset),  // Up
-            sf::Vector2f(0, offset),   // Down
-            sf::Vector2f(-offset, 0),  // Left
-            sf::Vector2f(offset, 0)    // Right
-        };
-        std::string wheelLabels[4] = {"Usable", "Block", "Weapon 2", "Weapon 1"};
-
-        // NEW: Fine adjustments to push TEXT outside the blue ring
-        sf::Vector2f textOffsets[4] = {
-            sf::Vector2f(0.0f, -45.0f),  // "Usable": Higher
-            sf::Vector2f(0.0f, 25.0f),   // "Block": Lower
-            sf::Vector2f(-45.0f, -10.0f),// "Weapon 2": More to the left
-            sf::Vector2f(45.0f, -10.0f)  // "Weapon 1": More to the right
-        };
-
-        for (int i = 0; i < 4; ++i) {
-            float slotX = wheelCX + wheelPositions[i].x;
-            float slotY = wheelCY + wheelPositions[i].y;
-
-            // Draw the slot name (with its own offset)
-            mUiText.setString(wheelLabels[i]);
-            mUiText.setCharacterSize(18); // A bit larger to be readable
-            mUiText.setOutlineThickness(2.0f); // Thick black border
-            sf::FloatRect textBounds = mUiText.getLocalBounds();
-
-            // Apply custom text offset
-            mUiText.setPosition(
-                slotX + textOffsets[i].x - (textBounds.width / 2.0f),
-                slotY + textOffsets[i].y
-            );
-            mWindow.draw(mUiText);
-
-            // If there is an item equipped there, draw it
-            if (wheelSlots[i]->id != 0) {
-                const sf::Texture* tex = mWorld.getTexture(wheelSlots[i]->id);
-                if (tex) {
-                    sf::Sprite icon(*tex);
-                    float scale = 40.0f / tex->getSize().x; // Icon size
-                    icon.setScale(scale, scale);
-                    icon.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
-                    icon.setPosition(slotX, slotY);
-                    mWindow.draw(icon);
-
-                    // Draw quantity
-                    sf::Text qtyText = mUiText;
-                    qtyText.setString(std::to_string(wheelSlots[i]->count));
-                    qtyText.setCharacterSize(14);
-                    qtyText.setPosition(slotX + 15.0f, slotY + 10.0f);
-                    mWindow.draw(qtyText);
-                }
-            }
+        for (auto& mob : mMobs) {
+            mob->render(mWindow, finalAmbient);
         }
 
         // ==========================================
-        // C) DRAW DRAGGED ITEM (DRAG & DROP)
+        // DRAW PARTICLES
         // ==========================================
-        if (mDraggedItem.id != 0) {
-            const sf::Texture* tex = mWorld.getTexture(mDraggedItem.id);
-            if (tex) {
-                sf::Vector2i mousePos = sf::Mouse::getPosition(mWindow);
+        sf::RectangleShape pShape;
+        for (const auto& p : mParticles) {
+            pShape.setSize(sf::Vector2f(p.size, p.size));
+            pShape.setPosition(p.position);
 
-                sf::Sprite dragIcon(*tex);
-                float scale = 40.0f / tex->getSize().x;
-                dragIcon.setScale(scale, scale);
-                // Center the icon on the mouse tip
-                dragIcon.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
-                dragIcon.setPosition(static_cast<float>(mousePos.x), static_cast<float>(mousePos.y));
-                mWindow.draw(dragIcon);
+            sf::Color c = p.color;
+            // Fade Out Effect: They become transparent when dying
+            c.a = static_cast<sf::Uint8>(255.0f * (p.lifetime / p.maxLifetime));
 
-                // Quantity of dragged item
-                mUiText.setString(std::to_string(mDraggedItem.count));
-                mUiText.setCharacterSize(16);
-                mUiText.setPosition(mousePos.x + 10.0f, mousePos.y + 10.0f);
-                mWindow.draw(mUiText);
-            }
+            // Magic! We darken them with finalAmbient so they don't shine in caves
+            c.r = (c.r * finalAmbient.r) / 255;
+            c.g = (c.g * finalAmbient.g) / 255;
+            c.b = (c.b * finalAmbient.b) / 255;
+
+            pShape.setFillColor(c);
+            mWindow.draw(pShape);
         }
+
         // ==========================================
-        // D) CRAFTING MENU (Diseño Mejorado)
+        // 3. DRAW INTERFACE (UI)
         // ==========================================
-        float craftX = 50.0f;
-        float craftY = 100.0f;
-        float rowHeight = 60.0f;
-        float panelWidth = 320.0f; // Panel ancho para mostrar ingredientes
+        if (mIsPlayerDead) {
+            renderDeathScreen();
+        } else {
+            renderHUD();    // Cursor, mining bar, health, item in hand
+            renderMenus();  // Inventory, Furnaces, Chests, Crafting
+        }
+        if (mGameState == GameState::Paused) {
+            mWindow.setView(mWindow.getDefaultView());
+            sf::RectangleShape darkOverlay(sf::Vector2f(1920, 1080));
+            darkOverlay.setFillColor(sf::Color(0, 0, 0, 150));
+            mWindow.draw(darkOverlay);
+            mWindow.draw(mPauseTitleText);
 
-        // Menu title
-        mUiText.setString("CRAFTING");
-        mUiText.setCharacterSize(24);
-        mUiText.setOutlineThickness(2.0f);
-        mUiText.setPosition(craftX, craftY - 40.0f);
-        mWindow.draw(mUiText);
-
-        for (size_t i = 0; i < mRecipes.size(); ++i) {
-            const Recipe& recipe = mRecipes[i];
-            bool possible = canCraft(recipe);
-
-            // 1. DIBUJAR EL FONDO DE LA FILA
-            sf::RectangleShape rowBg(sf::Vector2f(panelWidth, rowHeight - 5.0f));
-            rowBg.setPosition(craftX, craftY + i * rowHeight);
-            rowBg.setFillColor(sf::Color(40, 40, 40, 200));
-
-            if (possible) {
-                rowBg.setOutlineColor(sf::Color(50, 200, 50, 200)); // Borde verde
-                rowBg.setOutlineThickness(2.0f);
-            } else {
-                rowBg.setOutlineColor(sf::Color(100, 100, 100, 150)); // Borde gris
-                rowBg.setOutlineThickness(1.0f);
-            }
-            mWindow.draw(rowBg);
-
-            // 2. DIBUJAR EL ICONO DEL RESULTADO (A la izquierda)
-            const sf::Texture* resTex = mWorld.getTexture(recipe.resultId);
-            if (resTex) {
-                sf::Sprite resIcon(*resTex);
-                float scale = 40.0f / resTex->getSize().x;
-                resIcon.setScale(scale, scale);
-                resIcon.setPosition(craftX + 10.0f, craftY + i * rowHeight + 7.0f);
-
-                if (!possible) resIcon.setColor(sf::Color(255, 255, 255, 100)); // Transparente si no puedes
-                mWindow.draw(resIcon);
-
-                // Si fabrica más de 1 (ej: 4 Antorchas), mostrar el número
-                if (recipe.resultCount > 1) {
-                    mUiText.setString(std::to_string(recipe.resultCount));
-                    mUiText.setCharacterSize(16);
-                    mUiText.setFillColor(sf::Color::Yellow); // Amarillo para destacar
-                    mUiText.setPosition(craftX + 35.0f, craftY + i * rowHeight + 32.0f);
-                    mWindow.draw(mUiText);
-                    mUiText.setFillColor(sf::Color::White); // Restaurar color
-                }
-            }
-
-            // 3. DIBUJAR LOS INGREDIENTES REQUERIDOS (A la derecha del resultado)
-            float ingX = craftX + 80.0f; // Empezamos a dibujar más a la derecha
-
-            for (const auto& ing : recipe.ingredients) {
-                int ingID = ing.first;
-                int reqAmount = ing.second;
-                int hasAmount = getItemCount(ingID);
-
-                const sf::Texture* ingTex = mWorld.getTexture(ingID);
-                if (ingTex) {
-                    // Icono del ingrediente en chiquito
-                    sf::Sprite ingIcon(*ingTex);
-                    float scale = 24.0f / ingTex->getSize().x;
-                    ingIcon.setScale(scale, scale);
-                    ingIcon.setPosition(ingX, craftY + i * rowHeight + 15.0f);
-                    if (!possible) ingIcon.setColor(sf::Color(255, 255, 255, 150));
-                    mWindow.draw(ingIcon);
-
-                    // Texto: Tienes / Necesitas (ej: "2/5")
-                    mUiText.setString(std::to_string(hasAmount) + "/" + std::to_string(reqAmount));
-                    mUiText.setCharacterSize(14);
-
-                    // Si tienes menos de lo necesario, el texto se pone ROJO
-                    if (hasAmount >= reqAmount) {
-                        mUiText.setFillColor(sf::Color::White);
-                    } else {
-                        mUiText.setFillColor(sf::Color(255, 80, 80));
-                    }
-
-                    mUiText.setPosition(ingX + 30.0f, craftY + i * rowHeight + 18.0f);
-                    mWindow.draw(mUiText);
-
-                    mUiText.setFillColor(sf::Color::White); // Restaurar a blanco siempre
-                    ingX += 75.0f; // Espacio para el siguiente ingrediente (Pico de hierro necesita 2 cosas)
-                }
-            }
+            // We reuse the Exit button from the main menu
+            mMenuExitText.setPosition(1920 / 2.0f, 650.0f);
+            mWindow.draw(mMenuExitText);
+            mMenuExitText.setPosition(1920 / 2.0f, 750.0f); // We return it to its original place for later
         }
     }
-
-    // ALWAYS THE LAST THING
     mWindow.display();
 }
 
@@ -1336,15 +1271,41 @@ void Game::saveGame() {
         file.write(reinterpret_cast<const char*>(&count), sizeof(count));
     }
 
-    // 2.5 SAVE EQUIPPED ITEMS (Rueda Táctica)
+    // 2.5 SAVE EQUIPPED ITEMS (Tactical Wheel)
     InventorySlot equipped[4] = { mEquippedPrimary, mEquippedSecondary, mEquippedBlock, mEquippedConsumable };
     for (int i = 0; i < 4; ++i) {
         file.write(reinterpret_cast<const char*>(&equipped[i].id), sizeof(equipped[i].id));
         file.write(reinterpret_cast<const char*>(&equipped[i].count), sizeof(equipped[i].count));
     }
 
+
     // 3. SAVE WORLD
     mWorld.saveToStream(file);
+
+    // 4. SAVE FURNACES (NEW!)
+    size_t furnaceCount = mActiveFurnaces.size();
+    file.write(reinterpret_cast<const char*>(&furnaceCount), sizeof(furnaceCount));
+
+    for (const auto& pair : mActiveFurnaces) {
+        file.write(reinterpret_cast<const char*>(&pair.first.first), sizeof(pair.first.first));
+        file.write(reinterpret_cast<const char*>(&pair.first.second), sizeof(pair.first.second));
+        file.write(reinterpret_cast<const char*>(&pair.second), sizeof(FurnaceData));
+    }
+
+    // 5. SAVE CHESTS
+    size_t chestCount = mActiveChests.size();
+    file.write(reinterpret_cast<const char*>(&chestCount), sizeof(chestCount));
+
+    for (const auto& pair : mActiveChests) {
+        file.write(reinterpret_cast<const char*>(&pair.first.first), sizeof(pair.first.first));
+        file.write(reinterpret_cast<const char*>(&pair.first.second), sizeof(pair.first.second));
+
+        // We save the 24 slots of each chest
+        for (const auto& slot : pair.second.slots) {
+            file.write(reinterpret_cast<const char*>(&slot.id), sizeof(slot.id));
+            file.write(reinterpret_cast<const char*>(&slot.count), sizeof(slot.count));
+        }
+    }
 
     file.close();
     std::cout << "--- GAME SAVED SUCCESSFULLY ---" << std::endl;
@@ -1382,38 +1343,109 @@ void Game::loadGame() {
         mBackpack[i].count = count;
     }
 
-    // 2.5 LOAD EQUIPPED ITEMS (Rueda Táctica)
+    // 2.5 LOAD EQUIPPED ITEMS (Tactical Wheel)
     InventorySlot* equippedPointers[4] = { &mEquippedPrimary, &mEquippedSecondary, &mEquippedBlock, &mEquippedConsumable };
     for (int i = 0; i < 4; ++i) {
         file.read(reinterpret_cast<char*>(&equippedPointers[i]->id), sizeof(equippedPointers[i]->id));
         file.read(reinterpret_cast<char*>(&equippedPointers[i]->count), sizeof(equippedPointers[i]->count));
     }
 
-    // Le avisamos al jugador de qué arma acabamos de cargar en su mano principal
-    mPlayer.setEquippedWeapon(mEquippedPrimary.id);
-
-    // SUPER IMPORTANT! After loading everything, recalculate weight
-    calculateTotalWeight();
+    mPlayer.setEquippedWeapon(0);
 
     // 3. LOAD WORLD
     mWorld.loadFromStream(file);
+
+    // 4. LOAD FURNACES (NEW!)
+    mActiveFurnaces.clear(); // We clear current furnaces just in case
+    size_t furnaceCount = 0;
+
+    // We read how many furnaces there are (if this read fails, it's because it's an old save)
+    if (file.read(reinterpret_cast<char*>(&furnaceCount), sizeof(furnaceCount))) {
+        for (size_t i = 0; i < furnaceCount; ++i) {
+            int fx, fy;
+            FurnaceData fd;
+
+            file.read(reinterpret_cast<char*>(&fx), sizeof(fx));
+            file.read(reinterpret_cast<char*>(&fy), sizeof(fy));
+            file.read(reinterpret_cast<char*>(&fd), sizeof(FurnaceData));
+
+            mActiveFurnaces[{fx, fy}] = fd;
+        }
+    }
+
+    // 5. LOAD CHESTS
+    mActiveChests.clear();
+    size_t chestCount = 0;
+
+    if (file.read(reinterpret_cast<char*>(&chestCount), sizeof(chestCount))) {
+        for (size_t i = 0; i < chestCount; ++i) {
+            int cx, cy;
+            ChestData cd;
+
+            file.read(reinterpret_cast<char*>(&cx), sizeof(cx));
+            file.read(reinterpret_cast<char*>(&cy), sizeof(cy));
+
+            for (int s = 0; s < 24; ++s) {
+                file.read(reinterpret_cast<char*>(&cd.slots[s].id), sizeof(cd.slots[s].id));
+                file.read(reinterpret_cast<char*>(&cd.slots[s].count), sizeof(cd.slots[s].count));
+            }
+
+            mActiveChests[{cx, cy}] = cd;
+        }
+    }
 
     file.close();
     std::cout << "--- GAME LOADED ---" << std::endl;
 }
 
 void Game::calculateTotalWeight() {
+    float oldWeight = mCurrentWeight;
     mCurrentWeight = 0.0f;
+
+    // 1. Add what is in the Backpack
     for (const auto& slot : mBackpack) {
         if (slot.id != 0) {
             mCurrentWeight += mItemDatabase[slot.id].weight * slot.count;
         }
     }
-    std::cout << "Current weight: " << mCurrentWeight << " / " << mMaxWeight << std::endl;
+
+    // 2. Add what is in the Tactical Wheel
+    InventorySlot* wheel[4] = { &mEquippedPrimary, &mEquippedSecondary, &mEquippedBlock, &mEquippedConsumable };
+    for (int i = 0; i < 4; ++i) {
+        if (wheel[i]->id != 0) {
+            mCurrentWeight += mItemDatabase[wheel[i]->id].weight * wheel[i]->count;
+        }
+    }
+
+    // 3. Add what you have grabbed with the mouse (So they don't cheat by floating items!)
+    if (mDraggedItem.id != 0) {
+        mCurrentWeight += mItemDatabase[mDraggedItem.id].weight * mDraggedItem.count;
+    }
+
+    // We only print if the weight has changed
+    if (std::abs(mCurrentWeight - oldWeight) > 0.01f) {
+        std::cout << "Current weight: " << mCurrentWeight << " / " << mMaxWeight << std::endl;
+    }
 }
 
 bool Game::addItemToBackpack(int id, int amount) {
-    // 1. Try to stack in a slot that already has this item
+    // 1. FIRST: Try to stack in the TACTICAL WHEEL
+    InventorySlot* wheel[4] = { &mEquippedConsumable, &mEquippedBlock, &mEquippedSecondary, &mEquippedPrimary };
+    for (int i = 0; i < 4; ++i) {
+        if (wheel[i]->id == id && wheel[i]->count < mItemDatabase[id].maxStack) {
+            int space = mItemDatabase[id].maxStack - wheel[i]->count;
+            if (amount <= space) {
+                wheel[i]->count += amount;
+                calculateTotalWeight();
+                return true; // Everything was saved
+            } else {
+                wheel[i]->count += space;
+                amount -= space; // We still have leftovers, we keep looking
+            }
+        }
+    }
+
+    // 2. SECOND: Try to stack in the BACKPACK (in slots where there is already that item)
     for (auto& slot : mBackpack) {
         if (slot.id == id && slot.count < mItemDatabase[id].maxStack) {
             int space = mItemDatabase[id].maxStack - slot.count;
@@ -1427,16 +1459,27 @@ bool Game::addItemToBackpack(int id, int amount) {
             }
         }
     }
-    // 2. If leftover, find an empty slot
+
+    // 3. THIRD: If leftover, find an empty slot in the BACKPACK
     for (auto& slot : mBackpack) {
         if (slot.id == 0) {
             slot.id = id;
-            slot.count = amount;
-            calculateTotalWeight();
-            return true;
+
+            // If the quantity we have left fits in a single slot
+            if (amount <= mItemDatabase[id].maxStack) {
+                slot.count = amount;
+                calculateTotalWeight();
+                return true;
+            } else {
+                // If we picked up a giant pile (e.g. 150 stone), we fill this slot and keep looking
+                slot.count = mItemDatabase[id].maxStack;
+                amount -= mItemDatabase[id].maxStack;
+            }
         }
     }
-    return false; // Backpack full!
+
+    // If we reach here, the inventory is 100% full
+    return false;
 }
 
 int Game::getItemCount(int id) {
@@ -1493,4 +1536,836 @@ void Game::craftItem(const Recipe& recipe) {
     // Crafting sound (use build sound for example)
     mSndBuild.setPitch(1.5f);
     mSndBuild.play();
+}
+
+void Game::respawnPlayer() {
+    // 1. Remove the death state
+    mIsPlayerDead = false;
+
+    // 2. Restore health to maximum
+    // (Make sure to have a setter for health in Player.h, e.g.: void setHp(int hp) { mHp = hp; })
+    mPlayer.setHp(100);
+
+    // 3. Teleport to Spawn (Find a safe place on the surface)
+    // We are going to make it so you always respawn in column X = 100 of your world
+    int gridX = 100;
+    float spawnX = gridX * mWorld.getTileSize();
+    float spawnY = 0.0f;
+
+    // We scan from the sky (Y=0) downwards looking for the first solid block
+    for (int y = 0; y < WORLD_HEIGHT; ++y) {
+        if (mWorld.getBlock(gridX, y) != 0) {
+            // We found the ground! We put the player 2 blocks above so they don't get stuck
+            spawnY = (y - 2) * mWorld.getTileSize();
+            break;
+        }
+    }
+
+    // We move the player to those safe coordinates
+    mPlayer.setPosition(sf::Vector2f(spawnX, spawnY));
+
+    // 4. Reset velocity
+    // Super important! If you died falling down a ravine, the player still has falling velocity.
+    // If we don't reset it, when you respawn you will crash into the ground and die again!
+    mPlayer.setVelocity(sf::Vector2f(0.0f, 0.0f));
+}
+
+bool Game::interactWithBlock(int gridX, int gridY) {
+    int blockID = mWorld.getBlock(gridX, gridY);
+    if (blockID == ItemID::AIR) return false;
+
+    // 1. CHECK DISTANCE
+    sf::Vector2f playerCenter = mPlayer.getCenter();
+    float pGridX = playerCenter.x / mWorld.getTileSize();
+    float pGridY = playerCenter.y / mWorld.getTileSize();
+
+    float dx = pGridX - gridX;
+    float dy = pGridY - gridY;
+    float distance = std::sqrt(dx*dx + dy*dy);
+
+    if (distance > 4.0f) { // Maximum reach: 4 blocks
+        return false;
+    }
+
+    //  CRAFTING TABLE
+    if (blockID == ItemID::CRAFTING_TABLE) {
+        mIsCraftingTableOpen = !mIsCraftingTableOpen;
+        mIsFurnaceOpen = false;
+        mIsInventoryOpen = mIsCraftingTableOpen;
+        std::cout << "You have opened the Crafting Table." << std::endl;
+        return true;
+    }
+
+    // FURNACE
+    if (blockID == ItemID::FURNACE) {
+        mIsFurnaceOpen = !mIsFurnaceOpen;
+        mIsInventoryOpen = mIsFurnaceOpen;
+        mIsCraftingTableOpen = false;
+
+        if (mIsFurnaceOpen) {
+            mOpenFurnacePos = {gridX, gridY};
+        }
+        std::cout << "You have opened the Furnace at " << gridX << ", " << gridY << std::endl;
+        return true;
+    }
+
+    //  CLOSED DOOR
+    if (blockID >= ItemID::DOOR && blockID <= ItemID::DOOR_TOP) {
+        int baseY = gridY;
+        if (blockID == ItemID::DOOR_MID) baseY = gridY + 1;
+        if (blockID == ItemID::DOOR_TOP) baseY = gridY + 2;
+
+        mWorld.setBlock(gridX, baseY,     ItemID::DOOR_OPEN);
+        mWorld.setBlock(gridX, baseY - 1, ItemID::DOOR_OPEN_MID);
+        mWorld.setBlock(gridX, baseY - 2, ItemID::DOOR_OPEN_TOP);
+        std::cout << "Door Opened!" << std::endl;
+        return true;
+    }
+
+    //  OPEN DOOR
+    if (blockID >= ItemID::DOOR_OPEN && blockID <= ItemID::DOOR_OPEN_TOP) {
+        int baseY = gridY;
+        if (blockID == ItemID::DOOR_OPEN_MID) baseY = gridY + 1;
+        if (blockID == ItemID::DOOR_OPEN_TOP) baseY = gridY + 2;
+
+        mWorld.setBlock(gridX, baseY,     ItemID::DOOR);
+        mWorld.setBlock(gridX, baseY - 1, ItemID::DOOR_MID);
+        mWorld.setBlock(gridX, baseY - 2, ItemID::DOOR_TOP);
+        std::cout << "Door Closed!" << std::endl;
+        return true;
+    }
+
+    // CHEST
+    if (blockID == ItemID::CHEST) {
+        mIsChestOpen = !mIsChestOpen;
+        mIsInventoryOpen = mIsChestOpen;
+        mIsFurnaceOpen = false;
+        mIsCraftingTableOpen = false;
+
+        if (mIsChestOpen) {
+            mOpenChestPos = {gridX, gridY};
+            if (mActiveChests.find(mOpenChestPos) == mActiveChests.end()) {
+                mActiveChests[mOpenChestPos] = ChestData();
+            }
+        }
+        std::cout << "You have opened a Chest at " << gridX << ", " << gridY << std::endl;
+        return true;
+    }
+
+    return false;
+}
+
+void Game::updateDayNightCycle(float dtAsSeconds) {
+    // 1. Advance the clock
+    mGameTime += dtAsSeconds;
+    if (mGameTime > DAY_LENGTH) {
+        mGameTime -= DAY_LENGTH; // The day starts again
+    }
+
+    // We calculate in what percentage of the day we are (0.0 = start, 1.0 = end)
+    float timeFraction = mGameTime / DAY_LENGTH;
+
+    // 2. Define the colors of each phase
+    sf::Color nightColor(30, 30, 50);     // Dark blue (Night)
+    sf::Color dawnColor(200, 120, 100);   // Orange/Pink (Sunrise)
+    sf::Color dayColor(255, 255, 255);    // Pure white (Noon)
+    sf::Color duskColor(120, 60, 80);     // Dark Red/Purple (Sunset)
+
+    sf::Color startColor;
+    sf::Color targetColor;
+    float lerpFactor = 0.0f;
+
+    // 3. Decide in which phase we are and calculate the transition
+    if (timeFraction < 0.25f) {
+        // 0% to 25%: Sunrise -> Day
+        startColor = dawnColor;
+        targetColor = dayColor;
+        lerpFactor = timeFraction / 0.25f;
+    }
+    else if (timeFraction < 0.50f) {
+        // 25% to 50%: Full Day
+        startColor = dayColor;
+        targetColor = dayColor; // Stays white
+        lerpFactor = 1.0f;
+    }
+    else if (timeFraction < 0.75f) {
+        // 50% to 75%: Day -> Sunset -> Night
+        startColor = dayColor;
+        targetColor = nightColor;
+        lerpFactor = (timeFraction - 0.50f) / 0.25f;
+    }
+    else {
+        // 75% to 100%: Night -> Sunrise
+        startColor = nightColor;
+        targetColor = dawnColor;
+        lerpFactor = (timeFraction - 0.75f) / 0.25f;
+    }
+
+    // 4. Apply mathematical interpolation to mix the colors
+    mAmbientLight.r = startColor.r + (targetColor.r - startColor.r) * lerpFactor;
+    mAmbientLight.g = startColor.g + (targetColor.g - startColor.g) * lerpFactor;
+    mAmbientLight.b = startColor.b + (targetColor.b - startColor.b) * lerpFactor;
+
+    // 5. Darken the sky too!
+    // I assume you have mSkySprite for the background, if it's called differently change it
+    mSkySprite.setColor(mAmbientLight);
+}
+
+void Game::renderHUD() {
+    float tileSize = mWorld.getTileSize();
+    sf::Vector2i pixelPos = sf::Mouse::getPosition(mWindow);
+    sf::Vector2f worldPos = mWindow.mapPixelToCoords(pixelPos);
+
+    int gridX = static_cast<int>(std::floor(worldPos.x / tileSize));
+    int gridY = static_cast<int>(std::floor(worldPos.y / tileSize));
+
+    float blockCenterX = (gridX * tileSize) + (tileSize / 2.0f);
+    float blockCenterY = (gridY * tileSize) + (tileSize / 2.0f);
+
+    sf::Vector2f playerCenter = mPlayer.getPosition();
+    float dist = std::sqrt(std::pow(blockCenterX - playerCenter.x, 2) + std::pow(blockCenterY - playerCenter.y, 2));
+    float maxRange = 180.0f;
+
+    // 1. Mouse Selector
+    sf::RectangleShape selector(sf::Vector2f(tileSize, tileSize));
+    selector.setPosition(gridX * tileSize, gridY * tileSize);
+    selector.setFillColor(sf::Color::Transparent);
+    selector.setOutlineThickness(2.0f);
+    selector.setOutlineColor(dist <= maxRange ? sf::Color(255, 255, 255, 150) : sf::Color(255, 0, 0, 150));
+    mWindow.draw(selector);
+
+    // 2. Mining Progress Bar
+    if (mMiningTimer > 0.0f && mCurrentHardness > 0.0f) {
+        float percent = std::min(mMiningTimer / mCurrentHardness, 1.0f);
+
+        sf::RectangleShape barBg(sf::Vector2f(tileSize * 0.8f, 6.0f));
+        barBg.setPosition(mMiningPos.x * tileSize + tileSize * 0.1f, mMiningPos.y * tileSize + tileSize * 0.1f);
+        barBg.setFillColor(sf::Color::Black);
+        mWindow.draw(barBg);
+
+        sf::RectangleShape barFill(sf::Vector2f((tileSize * 0.8f) * percent, 4.0f));
+        barFill.setPosition(barBg.getPosition().x + 1.0f, barBg.getPosition().y + 1.0f);
+        barFill.setFillColor(sf::Color::White);
+        mWindow.draw(barFill);
+    }
+
+    // 3. Active Item (Fixed HUD)
+    sf::View currentView = mWindow.getView();
+    mWindow.setView(mWindow.getDefaultView());
+
+    float uiX = 240.0f;
+    float uiY = 70.0f;
+    float slotSize = 40.0f;
+
+    sf::RectangleShape activeSlotBg(sf::Vector2f(slotSize, slotSize));
+    activeSlotBg.setPosition(uiX, uiY);
+    activeSlotBg.setFillColor(sf::Color(0, 0, 0, 150));
+    activeSlotBg.setOutlineThickness(2.0f);
+    activeSlotBg.setOutlineColor(sf::Color::White);
+    mWindow.draw(activeSlotBg);
+
+    if (mSelectedBlock != ItemID::AIR) {
+        const sf::Texture* tex = mWorld.getTexture(mSelectedBlock);
+        if (tex != nullptr) {
+            sf::Sprite icon(*tex);
+            float scale = (slotSize - 10.0f) / tex->getSize().x;
+            icon.setScale(scale, scale);
+            icon.setPosition(uiX + 5.0f, uiY + 5.0f);
+            mWindow.draw(icon);
+
+            InventorySlot* wheel[4] = { &mEquippedConsumable, &mEquippedBlock, &mEquippedSecondary, &mEquippedPrimary };
+            if (wheel[mActiveWheelSlot]->count > 0) {
+                mUiText.setString(std::to_string(wheel[mActiveWheelSlot]->count));
+                mUiText.setCharacterSize(14);
+                sf::FloatRect textBounds = mUiText.getLocalBounds();
+                mUiText.setPosition(uiX + slotSize - textBounds.width - 5.0f, uiY + slotSize - textBounds.height - 8.0f);
+                mWindow.draw(mUiText);
+            }
+        }
+    }
+
+    // 4. Health Hearts
+    int hpPerHeart = 10;
+    int maxHearts = mPlayer.getMaxHp() / hpPerHeart;
+    int heartsToDraw = mPlayer.getHp() / hpPerHeart;
+
+    float startX = 20.0f, startY = 20.0f, spacing = 40.0f;
+    for (int i = 0; i < maxHearts; ++i) {
+        mHeartSprite.setTexture(i < heartsToDraw ? mHeartFullTex : mHeartEmptyTex);
+        mHeartSprite.setPosition(startX + (i * spacing), startY);
+        mWindow.draw(mHeartSprite);
+    }
+
+    mWindow.setView(currentView);
+}
+
+void Game::renderMenus() {
+    // 1. General Dark Background
+    if (mIsInventoryOpen || mIsFurnaceOpen) {
+        sf::View uiView(sf::FloatRect(0.0f, 0.0f, mWindow.getSize().x, mWindow.getSize().y));
+        mWindow.setView(uiView);
+        sf::RectangleShape overlay(sf::Vector2f(mWindow.getSize().x, mWindow.getSize().y));
+        overlay.setFillColor(sf::Color(0, 0, 0, 150));
+        mWindow.draw(overlay);
+    }
+
+    // 2. Furnace Interface
+    if (mIsFurnaceOpen) {
+        mWindow.setView(mWindow.getDefaultView());
+        float scale = 6.0f;
+        mFurnaceBgSprite.setScale(scale, scale);
+
+        float bgX = (mWindow.getSize().x - mFurnaceBgTex.getSize().x * scale) / 2.0f;
+        float bgY = (mWindow.getSize().y - mFurnaceBgTex.getSize().y * scale) / 2.0f;
+        mFurnaceBgSprite.setPosition(bgX, bgY);
+        mWindow.draw(mFurnaceBgSprite);
+
+        float firePercent = mActiveFurnaces[mOpenFurnacePos].maxFuelTimer > 0.0f ?
+            std::clamp(mActiveFurnaces[mOpenFurnacePos].fuelTimer / mActiveFurnaces[mOpenFurnacePos].maxFuelTimer, 0.0f, 1.0f) : 0.0f;
+        float arrowPercent = std::clamp(mActiveFurnaces[mOpenFurnacePos].smeltTimer / 3.0f, 0.0f, 1.0f);
+
+        int fireHeight = static_cast<int>(9 * firePercent);
+        int fireTexY = 26 + (9 - fireHeight);
+        mFurnaceFireSprite.setTextureRect(sf::IntRect(39, fireTexY, 6, fireHeight));
+        mFurnaceFireSprite.setScale(scale, scale);
+        mFurnaceFireSprite.setPosition(bgX + (39 * scale), bgY + (fireTexY * scale));
+        mWindow.draw(mFurnaceFireSprite);
+
+        int arrowWidth = static_cast<int>(22 * arrowPercent);
+        mFurnaceArrowSprite.setTextureRect(sf::IntRect(53, 24, arrowWidth, 13));
+        mFurnaceArrowSprite.setScale(scale, scale);
+        mFurnaceArrowSprite.setPosition(bgX + (53 * scale), bgY + (24 * scale));
+        mWindow.draw(mFurnaceArrowSprite);
+
+        auto drawFurnaceSlot = [&](InventorySlot& slot, float startX, float startY) {
+            if (slot.id != ItemID::AIR && slot.count > 0) {
+                sf::Sprite itemSprite(*mWorld.getTexture(slot.id));
+                itemSprite.setScale(1.5f, 1.5f);
+                itemSprite.setPosition(bgX + (startX * scale) + 5.0f, bgY + (startY * scale) + 5.0f);
+                mWindow.draw(itemSprite);
+
+                sf::Text countText(std::to_string(slot.count), *mDeathTitleText.getFont(), 16);
+                countText.setFillColor(sf::Color::White);
+                countText.setOutlineColor(sf::Color::Black);
+                countText.setOutlineThickness(1.5f);
+                countText.setPosition(bgX + (startX * scale) + 20.0f, bgY + (startY * scale) + 20.0f);
+                mWindow.draw(countText);
+            }
+        };
+
+        drawFurnaceSlot(mActiveFurnaces[mOpenFurnacePos].input, 34.0f, 13.0f);
+        drawFurnaceSlot(mActiveFurnaces[mOpenFurnacePos].fuel, 34.0f, 37.0f);
+        drawFurnaceSlot(mActiveFurnaces[mOpenFurnacePos].output, 82.0f, 22.0f);
+    }
+
+    // 3. Inventory Menus (Backpack, Wheel, Chests, Crafting)
+    if (mIsInventoryOpen) {
+        sf::View uiView(sf::FloatRect(0.0f, 0.0f, mWindow.getSize().x, mWindow.getSize().y));
+        mWindow.setView(uiView);
+
+        float slotSize = 48.0f;
+        float padding = 8.0f;
+
+        // A) Backpack
+        float startX = (mWindow.getSize().x / 2.0f) - ((10 * slotSize + 9 * padding) / 2.0f);
+        float startY = mWindow.getSize().y - (3 * slotSize + 2 * padding) - 50.0f;
+
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 10; ++col) {
+                int index = row * 10 + col;
+                sf::RectangleShape slotBg(sf::Vector2f(slotSize, slotSize));
+                slotBg.setPosition(startX + col * (slotSize + padding), startY + row * (slotSize + padding));
+                slotBg.setFillColor(sf::Color(40, 40, 40, 200));
+                slotBg.setOutlineThickness(2.0f);
+                slotBg.setOutlineColor(sf::Color(100, 100, 100));
+                mWindow.draw(slotBg);
+
+                if (mBackpack[index].id != ItemID::AIR) {
+                    const sf::Texture* tex = mWorld.getTexture(mBackpack[index].id);
+                    if (tex) {
+                        sf::Sprite icon(*tex);
+                        float scale = (slotSize - 10.0f) / tex->getSize().x;
+                        icon.setScale(scale, scale);
+                        icon.setPosition(slotBg.getPosition().x + 5.0f, slotBg.getPosition().y + 5.0f);
+                        mWindow.draw(icon);
+
+                        mUiText.setString(std::to_string(mBackpack[index].count));
+                        mUiText.setCharacterSize(14);
+                        sf::FloatRect textBounds = mUiText.getLocalBounds();
+                        mUiText.setPosition(slotBg.getPosition().x + slotSize - textBounds.width - 4.0f,
+                                            slotBg.getPosition().y + slotSize - textBounds.height - 6.0f);
+                        mWindow.draw(mUiText);
+                    }
+                }
+            }
+        }
+
+        // B) Tactical Wheel and Crafting
+        if (!mIsFurnaceOpen && !mIsChestOpen) {
+            float wheelCX = mWindow.getSize().x / 2.0f;
+            float wheelCY = mWindow.getSize().y / 2.0f - 100.0f;
+            mWheelSprite.setPosition(wheelCX, wheelCY);
+            mWindow.draw(mWheelSprite);
+
+            InventorySlot* wheelSlots[4] = { &mEquippedConsumable, &mEquippedBlock, &mEquippedSecondary, &mEquippedPrimary };
+            float offset = 100.0f;
+            sf::Vector2f wheelPositions[4] = { sf::Vector2f(0, -offset), sf::Vector2f(0, offset), sf::Vector2f(-offset, 0), sf::Vector2f(offset, 0) };
+            std::string wheelLabels[4] = {"Usable", "Block", "Weapon 2", "Weapon 1"};
+            sf::Vector2f textOffsets[4] = { sf::Vector2f(0.0f, -45.0f), sf::Vector2f(0.0f, 25.0f), sf::Vector2f(-45.0f, -10.0f), sf::Vector2f(45.0f, -10.0f) };
+
+            for (int i = 0; i < 4; ++i) {
+                float slotX = wheelCX + wheelPositions[i].x;
+                float slotY = wheelCY + wheelPositions[i].y;
+
+                mUiText.setString(wheelLabels[i]);
+                mUiText.setCharacterSize(18);
+                mUiText.setOutlineThickness(2.0f);
+                sf::FloatRect textBounds = mUiText.getLocalBounds();
+                mUiText.setPosition(slotX + textOffsets[i].x - (textBounds.width / 2.0f), slotY + textOffsets[i].y);
+                mWindow.draw(mUiText);
+
+                if (wheelSlots[i]->id != ItemID::AIR) {
+                    const sf::Texture* tex = mWorld.getTexture(wheelSlots[i]->id);
+                    if (tex) {
+                        sf::Sprite icon(*tex);
+                        float scale = 40.0f / tex->getSize().x; // Icon size
+                        icon.setScale(scale, scale);
+                        icon.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
+                        icon.setPosition(slotX, slotY);
+                        mWindow.draw(icon);
+
+                        sf::Text qtyText = mUiText;
+                        qtyText.setString(std::to_string(wheelSlots[i]->count));
+                        qtyText.setCharacterSize(14);
+                        qtyText.setPosition(slotX + 15.0f, slotY + 10.0f);
+                        mWindow.draw(qtyText);
+                    }
+                }
+            }
+
+            // Crafting Menu
+            float craftX = 50.0f, craftY = 100.0f, rowHeight = 60.0f, panelWidth = 320.0f;
+            mUiText.setString(mIsCraftingTableOpen ? "CRAFTING TABLE" : "MANUAL CRAFTING");
+            mUiText.setCharacterSize(24);
+            mUiText.setOutlineThickness(2.0f);
+            mUiText.setPosition(craftX, craftY - 40.0f);
+            mWindow.draw(mUiText);
+
+            int displayIndex = 0;
+            for (size_t i = 0; i < mRecipes.size(); ++i) {
+                const Recipe& recipe = mRecipes[i];
+                if (recipe.requiresTable && !mIsCraftingTableOpen) continue;
+
+                bool possible = canCraft(recipe);
+                sf::RectangleShape rowBg(sf::Vector2f(panelWidth, rowHeight - 5.0f));
+                rowBg.setPosition(craftX, craftY + displayIndex * rowHeight);
+                rowBg.setFillColor(sf::Color(40, 40, 40, 200));
+                rowBg.setOutlineThickness(possible ? 2.0f : 1.0f);
+                rowBg.setOutlineColor(possible ? sf::Color(50, 200, 50, 200) : sf::Color(100, 100, 100, 150));
+                mWindow.draw(rowBg);
+
+                const sf::Texture* resTex = mWorld.getTexture(recipe.resultId);
+                if (resTex) {
+                    sf::Sprite resIcon(*resTex);
+                    float scale = 40.0f / resTex->getSize().x;
+                    resIcon.setScale(scale, scale);
+                    resIcon.setPosition(craftX + 10.0f, craftY + displayIndex * rowHeight + 7.0f);
+                    if (!possible) resIcon.setColor(sf::Color(255, 255, 255, 100));
+                    mWindow.draw(resIcon);
+
+                    if (recipe.resultCount > 1) {
+                        mUiText.setString(std::to_string(recipe.resultCount));
+                        mUiText.setCharacterSize(16);
+                        mUiText.setFillColor(sf::Color::Yellow);
+                        mUiText.setPosition(craftX + 35.0f, craftY + displayIndex * rowHeight + 32.0f);
+                        mWindow.draw(mUiText);
+                        mUiText.setFillColor(sf::Color::White);
+                    }
+                }
+
+                float ingX = craftX + 80.0f;
+                for (const auto& ing : recipe.ingredients) {
+                    const sf::Texture* ingTex = mWorld.getTexture(ing.first);
+                    if (ingTex) {
+                        sf::Sprite ingIcon(*ingTex);
+                        float scale = 24.0f / ingTex->getSize().x;
+                        ingIcon.setScale(scale, scale);
+                        ingIcon.setPosition(ingX, craftY + displayIndex * rowHeight + 15.0f);
+                        if (!possible) ingIcon.setColor(sf::Color(255, 255, 255, 150));
+                        mWindow.draw(ingIcon);
+
+                        mUiText.setString(std::to_string(getItemCount(ing.first)) + "/" + std::to_string(ing.second));
+                        mUiText.setCharacterSize(14);
+                        mUiText.setFillColor(getItemCount(ing.first) >= ing.second ? sf::Color::White : sf::Color(255, 80, 80));
+                        mUiText.setPosition(ingX + 30.0f, craftY + displayIndex * rowHeight + 18.0f);
+                        mWindow.draw(mUiText);
+                        mUiText.setFillColor(sf::Color::White);
+                        ingX += 75.0f;
+                    }
+                }
+                displayIndex++;
+            }
+        }
+
+        // C) Chest
+        if (mIsChestOpen) {
+            float cSlotSize = 60.0f, cPadding = 10.0f;
+            int cols = 6, rows = 4;
+            float chestStartX = (mWindow.getSize().x - ((cols * (cSlotSize + cPadding)) + cPadding)) / 2.0f;
+            float chestStartY = (mWindow.getSize().y - ((rows * (cSlotSize + cPadding)) + cPadding)) / 2.0f - 100.0f;
+
+            mUiText.setString("CHEST");
+            mUiText.setCharacterSize(24);
+            mUiText.setPosition(chestStartX, chestStartY - 40.0f);
+            mWindow.draw(mUiText);
+
+            sf::RectangleShape chestBg(sf::Vector2f(cols * (cSlotSize + cPadding) + cPadding, rows * (cSlotSize + cPadding) + cPadding));
+            chestBg.setPosition(chestStartX - cPadding, chestStartY - cPadding);
+            chestBg.setFillColor(sf::Color(60, 40, 20, 240));
+            chestBg.setOutlineThickness(3.0f);
+            chestBg.setOutlineColor(sf::Color::Black);
+            mWindow.draw(chestBg);
+
+            ChestData& currentChest = mActiveChests[mOpenChestPos];
+            for (int i = 0; i < 24; ++i) {
+                float x = chestStartX + (i % cols) * (cSlotSize + cPadding);
+                float y = chestStartY + (i / cols) * (cSlotSize + cPadding);
+
+                sf::RectangleShape slotRect(sf::Vector2f(cSlotSize, cSlotSize));
+                slotRect.setPosition(x, y);
+                slotRect.setFillColor(sf::Color(0, 0, 0, 150));
+                slotRect.setOutlineThickness(1.0f);
+                slotRect.setOutlineColor(sf::Color(100, 100, 100));
+                mWindow.draw(slotRect);
+
+                InventorySlot& slot = currentChest.slots[i];
+                if (slot.id != ItemID::AIR) {
+                    const sf::Texture* tex = mWorld.getTexture(slot.id);
+                    if (tex) {
+                        sf::Sprite spr(*tex);
+                        float scale = (cSlotSize - 10.0f) / tex->getSize().x;
+                        spr.setScale(scale, scale);
+                        spr.setPosition(x + 5.0f, y + 5.0f);
+                        mWindow.draw(spr);
+
+                        mUiText.setString(std::to_string(slot.count));
+                        mUiText.setCharacterSize(16);
+                        mUiText.setPosition(x + cSlotSize - 20.0f, y + cSlotSize - 25.0f);
+                        mWindow.draw(mUiText);
+                    }
+                }
+            }
+        }
+
+        // D) Drag & Drop
+        if (mDraggedItem.id != ItemID::AIR) {
+            const sf::Texture* tex = mWorld.getTexture(mDraggedItem.id);
+            if (tex) {
+                sf::Vector2i mousePos = sf::Mouse::getPosition(mWindow);
+                sf::Sprite dragIcon(*tex);
+                float scale = 40.0f / tex->getSize().x;
+                dragIcon.setScale(scale, scale);
+                dragIcon.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
+                dragIcon.setPosition(static_cast<float>(mousePos.x), static_cast<float>(mousePos.y));
+                mWindow.draw(dragIcon);
+
+                mUiText.setString(std::to_string(mDraggedItem.count));
+                mUiText.setCharacterSize(16);
+                mUiText.setPosition(mousePos.x + 10.0f, mousePos.y + 10.0f);
+                mWindow.draw(mUiText);
+            }
+        }
+    }
+}
+
+void Game::renderDeathScreen() {
+    float screenW = static_cast<float>(mWindow.getSize().x);
+    float screenH = static_cast<float>(mWindow.getSize().y);
+    sf::View deathView(sf::FloatRect(0.0f, 0.0f, screenW, screenH));
+    mWindow.setView(deathView);
+
+    mDeathOverlay.setSize(sf::Vector2f(screenW, screenH));
+
+    sf::FloatRect titleBounds = mDeathTitleText.getLocalBounds();
+    mDeathTitleText.setOrigin(titleBounds.left + titleBounds.width / 2.0f, titleBounds.top + titleBounds.height / 2.0f);
+    mDeathTitleText.setPosition(screenW / 2.0f, screenH / 2.0f - 50.0f);
+
+    sf::FloatRect subBounds = mDeathSubText.getLocalBounds();
+    mDeathSubText.setOrigin(subBounds.left + subBounds.width / 2.0f, subBounds.top + subBounds.height / 2.0f);
+    mDeathSubText.setPosition(screenW / 2.0f, screenH / 2.0f + 50.0f);
+
+    mWindow.draw(mDeathOverlay);
+    mWindow.draw(mDeathTitleText);
+    mWindow.draw(mDeathSubText);
+}
+
+void Game::handleMouseClick(float mx, float my) {
+    float slotSize = 48.0f;
+    float padding = 8.0f;
+    float startX = (mWindow.getSize().x / 2.0f) - ((10 * slotSize + 9 * padding) / 2.0f);
+    float startY = mWindow.getSize().y - (3 * slotSize + 2 * padding) - 50.0f;
+
+    // A. Click in Backpack?
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 10; ++col) {
+            float sx = startX + col * (slotSize + padding);
+            float sy = startY + row * (slotSize + padding);
+            if (sf::FloatRect(sx, sy, slotSize, slotSize).contains(mx, my)) {
+                int index = row * 10 + col;
+                if (mBackpack[index].id != ItemID::AIR) {
+                    mDraggedItem = mBackpack[index];
+                    mDragSourceType = 1;
+                    mBackpack[index].id = ItemID::AIR;
+                    mBackpack[index].count = 0;
+                    return; // If we already picked something up, we leave
+                }
+            }
+        }
+    }
+
+    // B. Click in Tactical Wheel?
+    if (mDraggedItem.id == ItemID::AIR && !mIsFurnaceOpen && !mIsChestOpen) {
+        float wheelCX = mWindow.getSize().x / 2.0f;
+        float wheelCY = mWindow.getSize().y / 2.0f - 100.0f;
+        float offset = 100.0f;
+        sf::Vector2f wheelPositions[4] = { sf::Vector2f(0, -offset), sf::Vector2f(0, offset), sf::Vector2f(-offset, 0), sf::Vector2f(offset, 0) };
+        InventorySlot* wheelSlots[4] = { &mEquippedConsumable, &mEquippedBlock, &mEquippedSecondary, &mEquippedPrimary };
+
+        for (int i = 0; i < 4; ++i) {
+            float sx = wheelCX + wheelPositions[i].x - 30.0f;
+            float sy = wheelCY + wheelPositions[i].y - 30.0f;
+            if (sf::FloatRect(sx, sy, 60.0f, 60.0f).contains(mx, my) && wheelSlots[i]->id != ItemID::AIR) {
+                mDraggedItem = *wheelSlots[i];
+                mDragSourceType = 2;
+                wheelSlots[i]->id = ItemID::AIR;
+                wheelSlots[i]->count = 0;
+                return;
+            }
+        }
+    }
+
+    // C. Click in Crafting Menu?
+    if (mDraggedItem.id == ItemID::AIR && !mIsFurnaceOpen && !mIsChestOpen) {
+        float craftX = 50.0f, craftY = 100.0f, rowHeight = 60.0f, panelWidth = 320.0f;
+        int displayIndex = 0;
+        for (size_t i = 0; i < mRecipes.size(); ++i) {
+            if (mRecipes[i].requiresTable && !mIsCraftingTableOpen) continue;
+
+            float sx = craftX;
+            float sy = craftY + displayIndex * rowHeight;
+            if (sf::FloatRect(sx, sy, panelWidth, rowHeight - 5.0f).contains(mx, my)) {
+                if (canCraft(mRecipes[i])) craftItem(mRecipes[i]);
+                return;
+            }
+            displayIndex++;
+        }
+    }
+
+    // D. Click in Furnace?
+    if (mIsFurnaceOpen && mDraggedItem.id == ItemID::AIR) {
+        float scale = 6.0f;
+        float bgX = (mWindow.getSize().x - mFurnaceBgTex.getSize().x * scale) / 2.0f;
+        float bgY = (mWindow.getSize().y - mFurnaceBgTex.getSize().y * scale) / 2.0f;
+
+        auto checkFurnaceSlot = [&](InventorySlot& slot, float texX, float texY, float texW, float texH) {
+            if (sf::FloatRect(bgX + texX * scale, bgY + texY * scale, texW * scale, texH * scale).contains(mx, my)) {
+                if (slot.id != ItemID::AIR) {
+                    mDraggedItem = slot;
+                    slot.id = ItemID::AIR;
+                    slot.count = 0;
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        if (checkFurnaceSlot(mActiveFurnaces[mOpenFurnacePos].input, 34.0f, 13.0f, 17.0f, 11.0f)) return;
+        if (checkFurnaceSlot(mActiveFurnaces[mOpenFurnacePos].fuel, 34.0f, 37.0f, 17.0f, 11.0f)) return;
+        if (checkFurnaceSlot(mActiveFurnaces[mOpenFurnacePos].output, 81.0f, 21.0f, 23.0f, 17.0f)) return;
+    }
+
+    // E. Click in Chest?
+    if (mIsChestOpen && mDraggedItem.id == ItemID::AIR) {
+        float slotSizeChest = 60.0f, paddingChest = 10.0f;
+        int cols = 6, rows = 4;
+        float chestStartX = (mWindow.getSize().x - ((cols * (slotSizeChest + paddingChest)) + paddingChest)) / 2.0f;
+        float chestStartY = (mWindow.getSize().y - ((rows * (slotSizeChest + paddingChest)) + paddingChest)) / 2.0f - 100.0f;
+
+        ChestData& currentChest = mActiveChests[mOpenChestPos];
+        for (int i = 0; i < 24; ++i) {
+            float sx = chestStartX + (i % cols) * (slotSizeChest + paddingChest);
+            float sy = chestStartY + (i / cols) * (slotSizeChest + paddingChest);
+
+            if (sf::FloatRect(sx, sy, slotSizeChest, slotSizeChest).contains(mx, my) && currentChest.slots[i].id != ItemID::AIR) {
+                mDraggedItem = currentChest.slots[i];
+                currentChest.slots[i].id = ItemID::AIR;
+                currentChest.slots[i].count = 0;
+                calculateTotalWeight();
+                return;
+            }
+        }
+    }
+}
+
+void Game::handleMouseRelease(float mx, float my) {
+    if (mDraggedItem.id == ItemID::AIR) return;
+
+    float slotSize = 48.0f, padding = 8.0f;
+    float startX = (mWindow.getSize().x / 2.0f) - ((10 * slotSize + 9 * padding) / 2.0f);
+    float startY = mWindow.getSize().y - (3 * slotSize + 2 * padding) - 50.0f;
+
+    // A. Drop in Backpack
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 10; ++col) {
+            float sx = startX + col * (slotSize + padding);
+            float sy = startY + row * (slotSize + padding);
+            if (sf::FloatRect(sx, sy, slotSize, slotSize).contains(mx, my)) {
+                int index = row * 10 + col;
+                InventorySlot temp = mBackpack[index];
+                mBackpack[index] = mDraggedItem;
+                mDraggedItem = temp;
+                return; // Dropped successfully!
+            }
+        }
+    }
+
+    // B. Drop in Tactical Wheel
+    if (!mIsFurnaceOpen && !mIsChestOpen) {
+        float wheelCX = mWindow.getSize().x / 2.0f;
+        float wheelCY = mWindow.getSize().y / 2.0f - 100.0f;
+        sf::Vector2f wheelPositions[4] = { sf::Vector2f(0, -100.0f), sf::Vector2f(0, 100.0f), sf::Vector2f(-100.0f, 0), sf::Vector2f(100.0f, 0) };
+        InventorySlot* wheelSlots[4] = { &mEquippedConsumable, &mEquippedBlock, &mEquippedSecondary, &mEquippedPrimary };
+
+        for (int i = 0; i < 4; ++i) {
+            float sx = wheelCX + wheelPositions[i].x - 30.0f;
+            float sy = wheelCY + wheelPositions[i].y - 30.0f;
+            if (sf::FloatRect(sx, sy, 60.0f, 60.0f).contains(mx, my)) {
+                int dragID = mDraggedItem.id;
+                bool allowed = false;
+
+                if (i == 0 && (dragID == ItemID::MEAT || dragID == ItemID::TORCH)) allowed = true; // Up (Consumables)
+
+                else if (i == 1 && (((dragID >= ItemID::DIRT && dragID <= ItemID::TUNGSTEN) && dragID != ItemID::TORCH) || dragID == ItemID::DOOR || dragID == ItemID::CRAFTING_TABLE || dragID == ItemID::FURNACE || dragID == ItemID::CHEST)) allowed = true; // Down (Blocks)
+
+                else if ((i == 2 || i == 3) && ((dragID >= ItemID::WOOD_PICKAXE && dragID <= ItemID::TUNGSTEN_PICKAXE) || (dragID >= ItemID::WOOD_SWORD && dragID <= ItemID::TUNGSTEN_SWORD))) {
+                    allowed = true; // Sides (Pickaxes and Swords allowed)
+                }
+
+                if (allowed) {
+                    InventorySlot temp = *wheelSlots[i];
+                    *wheelSlots[i] = mDraggedItem;
+                    mDraggedItem = temp;
+                    return;
+                } else {
+                    std::cout << "You cannot equip that item in this slot!" << std::endl;
+                }
+            }
+        }
+    }
+
+    // C. Drop in Furnace
+    if (mIsFurnaceOpen) {
+        float scale = 6.0f;
+        float bgX = (mWindow.getSize().x - mFurnaceBgTex.getSize().x * scale) / 2.0f;
+        float bgY = (mWindow.getSize().y - mFurnaceBgTex.getSize().y * scale) / 2.0f;
+
+        auto tryDropFurnace = [&](InventorySlot& slot, float texX, float texY, float texW, float texH, bool isOutput) {
+            if (sf::FloatRect(bgX + texX * scale, bgY + texY * scale, texW * scale, texH * scale).contains(mx, my)) {
+                if (isOutput) {
+                    std::cout << "You cannot put items in the output tray!" << std::endl;
+                    return false;
+                }
+                InventorySlot temp = slot;
+                slot = mDraggedItem;
+                mDraggedItem = temp;
+                return true;
+            }
+            return false;
+        };
+
+        if (tryDropFurnace(mActiveFurnaces[mOpenFurnacePos].input, 34.0f, 13.0f, 17.0f, 11.0f, false)) return;
+        if (tryDropFurnace(mActiveFurnaces[mOpenFurnacePos].fuel, 34.0f, 37.0f, 17.0f, 11.0f, false)) return;
+        if (tryDropFurnace(mActiveFurnaces[mOpenFurnacePos].output, 81.0f, 21.0f, 23.0f, 17.0f, true)) return;
+    }
+
+    // D. Drop in Chest
+    if (mIsChestOpen) {
+        float slotSizeChest = 60.0f, paddingChest = 10.0f;
+        int cols = 6, rows = 4;
+        float chestStartX = (mWindow.getSize().x - ((cols * (slotSizeChest + paddingChest)) + paddingChest)) / 2.0f;
+        float chestStartY = (mWindow.getSize().y - ((rows * (slotSizeChest + paddingChest)) + paddingChest)) / 2.0f - 100.0f;
+
+        ChestData& currentChest = mActiveChests[mOpenChestPos];
+        for (int i = 0; i < 24; ++i) {
+            float sx = chestStartX + (i % cols) * (slotSizeChest + paddingChest);
+            float sy = chestStartY + (i / cols) * (slotSizeChest + paddingChest);
+
+            if (sf::FloatRect(sx, sy, slotSizeChest, slotSizeChest).contains(mx, my)) {
+                InventorySlot& clickedSlot = currentChest.slots[i];
+                if (clickedSlot.id == mDraggedItem.id) { // Stack
+                    int spaceLeft = mItemDatabase[clickedSlot.id].maxStack - clickedSlot.count;
+                    if (mDraggedItem.count <= spaceLeft) {
+                        clickedSlot.count += mDraggedItem.count;
+                        mDraggedItem.id = ItemID::AIR;
+                        mDraggedItem.count = 0;
+                    } else {
+                        clickedSlot.count += spaceLeft;
+                        mDraggedItem.count -= spaceLeft;
+                    }
+                } else { // Swap
+                    InventorySlot temp = clickedSlot;
+                    clickedSlot = mDraggedItem;
+                    mDraggedItem = temp;
+                }
+                calculateTotalWeight();
+                return;
+            }
+        }
+    }
+
+    // E. Drop in air (outside UI) -> Returns to backpack
+    if (mDraggedItem.id != ItemID::AIR) {
+        addItemToBackpack(mDraggedItem.id, mDraggedItem.count);
+        mDraggedItem.id = ItemID::AIR;
+        mDraggedItem.count = 0;
+    }
+}
+
+void Game::spawnParticles(sf::Vector2f pos, int itemID, int count) {
+    // 1. We choose the color according to the material
+    sf::Color pColor = sf::Color::White;
+    switch(itemID) {
+        case ItemID::DIRT: pColor = sf::Color(139, 69, 19); break;     // Dirt brown
+        case ItemID::GRASS: pColor = sf::Color(34, 139, 34); break;    // Grass green
+        case ItemID::STONE: case ItemID::COAL:
+        case ItemID::FURNACE: pColor = sf::Color(128, 128, 128); break;// Stone gray
+        case ItemID::WOOD: case ItemID::CRAFTING_TABLE:
+        case ItemID::CHEST: case ItemID::DOOR:
+            pColor = sf::Color(101, 67, 33); break;                    // Dark wood brown
+        case ItemID::LEAVES: pColor = sf::Color(50, 205, 50); break;   // Lime green
+        case ItemID::MEAT: pColor = sf::Color(200, 0, 0); break;       // Red (Blood for enemies)
+        default: pColor = sf::Color(200, 200, 200); break;             // Default gray
+    }
+
+    // 2. We generate the shrapnel
+    for(int i = 0; i < count; ++i) {
+        Particle p;
+        p.position = pos;
+
+        // Random velocity: X (left/right), Y (always jump up)
+        float vx = (rand() % 300) - 150.0f; // -150 to 150
+        float vy = -((rand() % 200) + 150.0f); // -150 to -350
+
+        p.velocity = sf::Vector2f(vx, vy);
+        p.color = pColor;
+
+        // They live between 0.3 and 0.7 seconds
+        p.maxLifetime = 0.3f + (rand() % 40) / 100.0f;
+        p.lifetime = p.maxLifetime;
+
+        // Size between 4 and 7 pixels
+        p.size = 4.0f + (rand() % 4);
+
+        mParticles.push_back(p);
+    }
 }
