@@ -33,6 +33,8 @@ add_executable(TerraForge
         src/Troodon.h
         src/Mob.cpp
         src/Mob.h
+        src/Projectile.cpp
+        src/Projectile.h
 )
 
 # --- Linking ---

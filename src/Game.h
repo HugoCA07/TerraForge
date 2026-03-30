@@ -10,6 +10,7 @@
 #include <vector>
 #include <utility>
 #include <fstream>
+#include "Projectile.h"
 
 enum class GameState {
     MainMenu,
@@ -27,6 +28,8 @@ enum ItemID {
     WOOD = 4,
     LEAVES = 5,
     TORCH = 6,
+    SAND = 13,
+    SNOW = 14,
 
     // Minerals
     COAL = 7,
@@ -47,6 +50,8 @@ enum ItemID {
     STONE_SWORD = 32,
     IRON_SWORD = 33,
     TUNGSTEN_SWORD = 34,
+    BOW = 35,       // <--- NUEVO: Arco
+    ARROW = 36,     // <--- NUEVO: Flecha
 
     // Structures and Doors
     DOOR = 25,
@@ -191,6 +196,9 @@ private:
 
     // --- THE MASTER LIST OF ENTITIES ---
     std::vector<std::unique_ptr<Mob>> mMobs;
+
+    // --- PROYECTILES ---
+    std::vector<std::unique_ptr<Projectile>> mProjectiles;
 
     // --- INTERACTION AND MENU SYSTEM ---
     bool mIsCraftingTableOpen = false;

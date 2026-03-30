@@ -121,74 +121,100 @@ void Player::update(sf::Time dt, World& world) {
     }
 
     // ==========================================
-    // 1.5 WEAPON VISUALS (CHOREOGRAPHY AND REST)
+    // 1.5 VISUALES DEL ARMA (COREOGRAFÍA Y REPOSO)
     // ==========================================
-    // We check if holding a Pickaxe (21-24) or a Sword (31-34)
-    bool isHoldingWeapon = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
-                           (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
+    // Comprobamos si tiene un Pico/Espada, o si tiene el Arco (ID 41)
+    bool isHoldingMelee = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
+                          (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
 
-    if (isHoldingWeapon) {
-        // 1. WE REQUEST THE HAND TEXTURE FROM THE WORLD (We no longer use the inventory one!)
+    // --- ¡CORREGIDO! Ahora el arco es el 35 ---
+    bool isHoldingBow = (mEquippedWeaponID == 35);
+
+    // --- ¡AQUÍ ESTABA EL FALLO! Ahora entra si es Melee O si es Arco ---
+    if (isHoldingMelee || isHoldingBow) {
+        // 1. PEDIMOS LA TEXTURA DE MANO AL MUNDO
         const sf::Texture* tex = world.getHeldTexture(mEquippedWeaponID);
 
         if (tex) {
             if (mWeaponSprite.getTexture() != tex) {
                 mWeaponSprite.setTexture(*tex, true);
 
-                // NEW ORIGIN! We shift the rotation point to the hilt.
-                mWeaponSprite.setOrigin(tex->getSize().x * 0.15f, tex->getSize().y * 0.75f);
+                // El origen depende del arma
+                if (isHoldingBow) {
+                    // El arco lo agarramos justo por el centro
+                    mWeaponSprite.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
+                } else {
+                    // Espadas y picos por la empuñadura baja
+                    mWeaponSprite.setOrigin(tex->getSize().x * 0.15f, tex->getSize().y * 0.75f);
+                }
             }
         }
 
         float facingDir = (mSprite.getScale().x > 0) ? 1.0f : -1.0f;
 
-        // --- NEW OFFSETS AND SCALE (SMALLER AND CLOSER TO HAND) ---
-        float handOffsetX = 22.0f * facingDir; // Fine adjustment (X) to place it in the fist
-        float handOffsetY = 5.0f;             // Fine adjustment (Y) to place it in the fist
+        // --- OFFSETS Y ESCALA ---
+        float handOffsetX = 22.0f * facingDir;
+        float handOffsetY = 5.0f;
 
         mWeaponSprite.setPosition(mSprite.getPosition().x + handOffsetX, mSprite.getPosition().y + handOffsetY);
-
-        // WE REDUCE THE SCALE (1.25f -> 0.85f) so it doesn't look giant
         mWeaponSprite.setScale(0.85f * facingDir, 0.85f);
 
         // ==========================================
-        // 3. PROFESSIONAL CHOREOGRAPHY (EASING MATHS)
+        // 3. COREOGRAFÍA PROFESIONAL (EASING MATHS)
         // ==========================================
         if (mCombatState != CombatState::None) {
 
             if (mCombatState == CombatState::Windup) {
-                // PHASE 1: WINDUP (Builds up power slowing at the top)
+                // FASE 1: LEVANTAR / TENSAR
                 float progress = mCombatTimer / 0.2f;
-                float ease = 1.0f - std::pow(1.0f - progress, 3.0f); // Ease Out Cubic
-                mWeaponSprite.setRotation(-70.0f * ease * facingDir);
+                float ease = 1.0f - std::pow(1.0f - progress, 3.0f);
+
+                if (isHoldingMelee) {
+                    mWeaponSprite.setRotation(-70.0f * ease * facingDir);
+                } else if (isHoldingBow) {
+                    // El arco pasa de estar vertical (90º) a apuntar hacia adelante (0º)
+                    mWeaponSprite.setRotation((90.0f - (90.0f * ease)) * facingDir);
+                }
             }
             else if (mCombatState == CombatState::Active) {
-                // PHASE 2: IMPACT (Accelerates brutally downwards)
+                // FASE 2: IMPACTO / DISPARO
                 float progress = mCombatTimer / 0.1f;
-                float ease = std::pow(progress, 3.0f); // Ease In Cubic
 
-                // Sweeps from -70º to +100º
-                float currentRot = -70.0f + (170.0f * ease);
-
-                // IMPACT SPIN (Spin Recoil): In the last milliseconds, the weapon bounces
-                float spin = 0.0f;
-                if (progress > 0.8f) {
-                    float impactProg = (progress - 0.8f) / 0.2f;
-                    spin = std::pow(impactProg, 2.0f) * 15.0f; // Small extra 15-degree vibration
+                if (isHoldingMelee) {
+                    float ease = std::pow(progress, 3.0f);
+                    float currentRot = -70.0f + (170.0f * ease);
+                    float spin = 0.0f;
+                    if (progress > 0.8f) {
+                        float impactProg = (progress - 0.8f) / 0.2f;
+                        spin = std::pow(impactProg, 2.0f) * 15.0f;
+                    }
+                    mWeaponSprite.setRotation((currentRot + spin) * facingDir);
+                } else if (isHoldingBow) {
+                    // ¡NUEVO! Al disparar, la cuerda pega un latigazo. Hacemos que vibre matemáticamente.
+                    float vibration = std::sin(progress * 30.0f) * 8.0f;
+                    mWeaponSprite.setRotation(vibration * facingDir);
                 }
-
-                mWeaponSprite.setRotation((currentRot + spin) * facingDir);
             }
             else if (mCombatState == CombatState::Recovery) {
-                // PHASE 3: RECOVER BALANCE (Smoothly returns to idle)
+                // FASE 3: RECUPERAR EQUILIBRIO
                 float progress = mCombatTimer / 0.3f;
-                float ease = 1.0f - std::pow(1.0f - progress, 2.0f); // Ease Out Quad
-                mWeaponSprite.setRotation((100.0f - (100.0f * ease)) * facingDir);
+                float ease = 1.0f - std::pow(1.0f - progress, 2.0f);
+
+                if (isHoldingMelee) {
+                    mWeaponSprite.setRotation((100.0f - (100.0f * ease)) * facingDir);
+                } else if (isHoldingBow) {
+                    // El arco vuelve a bajar suavemente a su posición vertical (90º)
+                    mWeaponSprite.setRotation((90.0f * ease) * facingDir);
+                }
             }
         }
         else {
-            // IDLE: Natural relaxed tilt
-            mWeaponSprite.setRotation(5.0f * facingDir);
+            // REPOSO
+            if (isHoldingMelee) {
+                mWeaponSprite.setRotation(5.0f * facingDir);
+            } else if (isHoldingBow) {
+                mWeaponSprite.setRotation(90.0f * facingDir); // El arco descansa en vertical
+            }
         }
     }
 
@@ -299,20 +325,18 @@ void Player::update(sf::Time dt, World& world) {
     // ==========================================
     // DECIDE ANIMATION (Depends on movement and weapon)
     // ==========================================
-    // ==========================================
-    // DECIDE ANIMATION (Depends on movement and weapon)
-    // ==========================================
-    isHoldingWeapon = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
-                      (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
+    // Creamos una nueva variable temporal que incluya al arco (35)
+    bool hasWeaponAnim = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
+                         (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 35);
 
     if (std::abs(mVelocity.x) > 10.0f) {
         mCurrentState = AnimState::Walk;
-        // If holding a pickaxe/sword, use row 3 (Walk with weapon). Otherwise, row 1 (Normal walk)
-        mCurrentRow = isHoldingWeapon ? 3 : 1;
+        // Usamos la nueva variable
+        mCurrentRow = hasWeaponAnim ? 3 : 1;
     } else {
         mCurrentState = AnimState::Idle;
-        // If holding a pickaxe/sword, use row 2 (Idle with weapon). Otherwise, row 0 (Normal idle)
-        mCurrentRow = isHoldingWeapon ? 2 : 0;
+        // Usamos la nueva variable
+        mCurrentRow = hasWeaponAnim ? 2 : 0;
     }
 
     // Player
@@ -359,7 +383,7 @@ void Player::render(sf::RenderWindow& window, sf::Color lightColor) {
 
     // --- NEW: ALWAYS draw the weapon if equipped ---
     bool isHoldingWeapon = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
-                           (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
+                           (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 35); // <--- ¡CAMBIADO DE 34 A 35!
 
     if (isHoldingWeapon) {
         // We apply the ambient light color (+ a touch of brightness)

@@ -159,6 +159,9 @@ Game::Game()
     mItemDatabase[ItemID::WOOD] = {"Log", 1.5f, 99};
     mItemDatabase[ItemID::LEAVES] = {"Leaves", 0.1f, 99};
     mItemDatabase[ItemID::TORCH] = {"Torch", 0.2f, 99};
+    // --- NUEVO: REGISTRAMOS LOS BIOMAS PARA QUE SE APILEN BIEN ---
+    mItemDatabase[ItemID::SAND] = {"Sand", 1.0f, 99};
+    mItemDatabase[ItemID::SNOW] = {"Snow", 1.0f, 99};
 
     // Minerals
     mItemDatabase[ItemID::COAL] = {"Coal", 1.0f, 99};
@@ -179,6 +182,9 @@ Game::Game()
     mItemDatabase[ItemID::STONE_SWORD] = {"Stone Sword", 4.0f, 1};
     mItemDatabase[ItemID::IRON_SWORD] = {"Iron Sword", 4.0f, 1};
     mItemDatabase[ItemID::TUNGSTEN_SWORD] = {"Tungsten Sword", 4.0f, 1};
+    // --- NUEVO: ARCO Y FLECHAS ---
+    mItemDatabase[ItemID::BOW] = {"Bow", 3.0f, 1};      // Solo cabe 1 arco por slot
+    mItemDatabase[ItemID::ARROW] = {"Arrow", 0.1f, 99}; // Caben 99 flechas
 
     // Structures
     mItemDatabase[ItemID::DOOR] = {"Wooden Door", 5.0f, 99};
@@ -196,6 +202,9 @@ Game::Game()
     addItemToBackpack(ItemID::DIRT, 15);
     addItemToBackpack(ItemID::MEAT, 5);
     addItemToBackpack(ItemID::TORCH, 5);
+    // --- NUEVO: KIT DE ARQUERO ---
+    addItemToBackpack(ItemID::BOW, 1);
+    addItemToBackpack(ItemID::ARROW, 50);
 
     if (!mDodoTexture.loadFromFile("assets/Dodo.png")) {
         std::cerr << "Error: Missing Dodos" << std::endl;
@@ -659,48 +668,66 @@ void Game::update(sf::Time dt) {
     float maxRange = 180.0f;
 
     // ==================================================
-    // 1. COMBAT SYSTEM (Depends on Animation)
+    // 1. COMBAT SYSTEM (Melee y Ranged)
     // ==================================================
-    // It runs automatically in the 'Active' frame of the attack,
-    // regardless of whether the mouse is still pressed or not!
     if (mPlayer.canDealDamage()) {
-
-        // 1. Calculate Weapon Damage (Based on your inventory)
-        int toolDamage = 1; // Fists
         int equippedID = mSelectedBlock;
 
-        // Pickaxe Damage (Lower, they are not for fighting)
-        if (equippedID == ItemID::WOOD_PICKAXE) toolDamage = 3;
-        if (equippedID == ItemID::STONE_PICKAXE) toolDamage = 5;
-        if (equippedID == ItemID::IRON_PICKAXE) toolDamage = 8;
-        if (equippedID == ItemID::TUNGSTEN_PICKAXE) toolDamage = 12;
+        // --- SISTEMA DE ARCO (RANGED) ---
+        if (equippedID == ItemID::BOW) {
 
-        // Sword Damage (Designed for killing)
-        if (equippedID == ItemID::WOOD_SWORD) toolDamage = 6;
-        if (equippedID == ItemID::STONE_SWORD) toolDamage = 10;
-        if (equippedID == ItemID::IRON_SWORD) toolDamage = 18;
-        if (equippedID == ItemID::TUNGSTEN_SWORD) toolDamage = 30;
+            // ¿Tenemos flechas en el inventario? (Consume 1)
+            if (consumeItem(ItemID::ARROW, 1)) {
 
-        sf::FloatRect attackHitbox = mPlayer.getWeaponHitbox();
+                // Calculamos la dirección del ratón
+                sf::Vector2i mousePixel = sf::Mouse::getPosition(mWindow);
+                sf::Vector2f mouseWorld = mWindow.mapPixelToCoords(mousePixel);
+                sf::Vector2f playerPos = mPlayer.getCenter();
 
-        for (auto& mob : mMobs) {
-            // If the axe hitbox touches the monster
-            if (attackHitbox.intersects(mob->getBounds())) {
+                float dx = mouseWorld.x - playerPos.x;
+                float dy = mouseWorld.y - playerPos.y;
+                float length = std::sqrt(dx*dx + dy*dy);
 
-                float dir = (mPlayer.getPosition().x < mob->getPosition().x) ? 1.0f : -1.0f;
+                // ¡VELOCIDAD ABSURDA PARA QUE VIAJEN RÁPIDO!
+                float speed = 1800.0f;
+                sf::Vector2f velocity((dx / length) * speed, (dy / length) * speed);
 
-                // We apply damage. If the bug receives the hit, it sounds
-                if (mob->takeDamage(toolDamage, dir)) {
-                    mSndHit.setPitch(1.0f + (rand() % 40) / 100.0f);
-                    mSndHit.play();
-                    // --- BLOOD EFFECT ---
-                    // We use MEAT so that it outputs red particles
-                    spawnParticles(mob->getBounds().getPosition() + sf::Vector2f(mob->getBounds().getSize().x / 2.0f, 0.0f), ItemID::MEAT, 8);
+                // Creamos la flecha (le pasamos la textura de la flecha del inventario, ID 36)
+                mProjectiles.push_back(std::make_unique<Projectile>(playerPos, velocity, *mWorld.getTexture(36)));
+
+                // Sonido de disparo (reusamos un sonido pero más agudo)
+                mSndBuild.setPitch(2.0f);
+                mSndBuild.play();
+            } else {
+                std::cout << "¡No te quedan flechas!" << std::endl;
+            }
+            mPlayer.registerHit(); // Seguro para no disparar 60 flechas a la vez
+        }
+        // --- SISTEMA DE ESPADAS/PICOS (MELEE) ---
+        else {
+            int toolDamage = 1;
+            if (equippedID == ItemID::WOOD_PICKAXE) toolDamage = 3;
+            if (equippedID == ItemID::STONE_PICKAXE) toolDamage = 5;
+            if (equippedID == ItemID::IRON_PICKAXE) toolDamage = 8;
+            if (equippedID == ItemID::TUNGSTEN_PICKAXE) toolDamage = 12;
+            if (equippedID == ItemID::WOOD_SWORD) toolDamage = 6;
+            if (equippedID == ItemID::STONE_SWORD) toolDamage = 10;
+            if (equippedID == ItemID::IRON_SWORD) toolDamage = 18;
+            if (equippedID == ItemID::TUNGSTEN_SWORD) toolDamage = 30;
+
+            sf::FloatRect attackHitbox = mPlayer.getWeaponHitbox();
+
+            for (auto& mob : mMobs) {
+                if (attackHitbox.intersects(mob->getBounds())) {
+                    float dir = (mPlayer.getPosition().x < mob->getPosition().x) ? 1.0f : -1.0f;
+                    if (mob->takeDamage(toolDamage, dir)) {
+                        mSndHit.setPitch(1.0f + (rand() % 40) / 100.0f);
+                        mSndHit.play();
+                        spawnParticles(mob->getBounds().getPosition() + sf::Vector2f(mob->getBounds().getSize().x / 2.0f, 0.0f), ItemID::MEAT, 8);
+                    }
+                    mPlayer.registerHit();
+                    break;
                 }
-
-                // We put the safety catch so as not to hit it 60 times in a second
-                mPlayer.registerHit();
-                break; // We break the loop to hit only 1 enemy per axe swing
             }
         }
     }
@@ -708,7 +735,7 @@ void Game::update(sf::Time dt) {
     // ==================================================
     // 2. MINING SYSTEM (Depends on keeping the Click pressed)
     // ==================================================
-    if (!mIsInventoryOpen) {
+    if (!mIsInventoryOpen && mSelectedBlock != ItemID::BOW) {
         if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
 
             // --- NEW! DISTANCE SAFETY CATCH IS BACK ---
@@ -890,7 +917,8 @@ void Game::update(sf::Time dt) {
                 }
             }
             else if (distance <= maxRange) {
-                bool isPlaceableBlock = ((mSelectedBlock >= ItemID::DIRT && mSelectedBlock <= ItemID::TUNGSTEN) ||
+                // --- CORRECCIÓN: Permitimos colocar hasta la Nieve ---
+                bool isPlaceableBlock = ((mSelectedBlock >= ItemID::DIRT && mSelectedBlock <= ItemID::SNOW) ||
                                           mSelectedBlock == ItemID::DOOR || mSelectedBlock == ItemID::CRAFTING_TABLE ||
                                           mSelectedBlock == ItemID::FURNACE || mSelectedBlock == ItemID::CHEST);
 
@@ -904,9 +932,6 @@ void Game::update(sf::Time dt) {
 
                     // =======================================
                     // SPECIAL CASE: PLACE DOOR (ID 25)
-                    // =======================================
-                    // =======================================
-                    // SPECIAL CASE: PLACE DOOR
                     // =======================================
                     if (mSelectedBlock == ItemID::DOOR) {
                         if (mWorld.getBlock(gridX, gridY) == ItemID::AIR &&
@@ -975,83 +1000,98 @@ void Game::update(sf::Time dt) {
     // --------------------------------------------------
     // UPDATE ALL MOBS (AI, DAMAGE AND CORPSES)
     // --------------------------------------------------
+
     // ==========================================
-    // AUTOMATIC CREATURE SPAWNER
+    // AUTOMATIC CREATURE SPAWNER (ROBUSTO)
     // ==========================================
     mSpawnTimer -= dt.asSeconds();
 
     if (mSpawnTimer <= 0.0f) {
-        // Reset the clock: between 10 and 20 seconds until the next spawn
+        // Reiniciamos el reloj: entre 10 y 20 segundos hasta el próximo spawn
         mSpawnTimer = 10.0f + (rand() % 10);
 
-        // Only spawn if we haven't reached the population limit
+        // Solo spawneamos si no hemos llegado al límite de población
         if (mMobs.size() < MAX_MOBS) {
 
-            // 1. DISTANCE: Much further (Between 1500 and 2500 pixels away)
+            // 1. DISTANCIA: Muy lejos (Entre 1500 y 2500 píxeles de distancia)
             float playerX = mPlayer.getPosition().x;
             float spawnDistance = 1500.0f + (rand() % 1000);
 
             float spawnX;
             if (rand() % 2 == 0) {
-                spawnX = playerX - spawnDistance; // Left
+                spawnX = playerX - spawnDistance; // Izquierda
             } else {
-                spawnX = playerX + spawnDistance; // Right
+                spawnX = playerX + spawnDistance; // Derecha
             }
 
-            // 2. Find the ground (Y) at that X coordinate
+            // 2. Encontrar el suelo real (Y) en esa coordenada X
             float tileSize = mWorld.getTileSize();
             int gridX = std::max(0, static_cast<int>(spawnX / tileSize));
 
             float spawnY = 0.0f;
             bool groundFound = false;
 
-            // Raycast from the sky downwards
-            for (int y = 0; y < 200; ++y) {
-                if (mWorld.getBlock(gridX, y) != 0) {
-                    // WE FOUND THE GROUND!
-                    // But before confirming, check that it is a safe place (no walls on the sides)
-                    // Check if the space above (y-1, y-2) and to the sides (x-1, x+1) is pure air (0)
-                    if (y >= 3 &&
-                        mWorld.getBlock(gridX, y - 1) == 0 &&       // Center free
-                        mWorld.getBlock(gridX, y - 2) == 0 &&       // High center free
-                        mWorld.getBlock(gridX - 1, y - 1) == 0 &&   // Left free
-                        mWorld.getBlock(gridX + 1, y - 1) == 0) {   // Right free
+            // Lanzamos un raycast desde el cielo hacia abajo
+            for (int y = 1; y < WORLD_HEIGHT; ++y) {
+                int blockID = mWorld.getBlock(gridX, y);
 
-                        spawnY = (y - 2) * tileSize; // Born a couple of blocks above, safe
-                        groundFound = true;
+                // ¡CORRECCIÓN! Solo nos detenemos si el bloque es SÓLIDO (Tierra, piedra, etc.)
+                // Ignoramos hojas, madera o antorchas.
+                if (World::isSolid(blockID)) {
+
+                    // Hemos encontrado suelo firme. ¿Hay espacio para que nazca el bicho?
+                    // Escaneamos un área de 3x3 bloques JUSTO ENCIMA de este suelo
+                    bool isSpaceClear = true;
+
+                    for (int checkX = gridX - 1; checkX <= gridX + 1; ++checkX) {
+                        for (int checkY = y - 3; checkY <= y - 1; ++checkY) {
+                            if (checkY >= 0) {
+                                int aboveBlock = mWorld.getBlock(checkX, checkY);
+                                // Si hay cualquier bloque sólido estorbando, cancelamos
+                                if (World::isSolid(aboveBlock)) {
+                                    isSpaceClear = false;
+                                    break;
+                                }
+                            }
                         }
+                        if (!isSpaceClear) break;
+                    }
 
-                    // Whether it is a valid place or not, break the loop because we already touched the surface
-                    // (This prevents them from continuing to search and spawning inside dark caves)
+                    if (isSpaceClear) {
+                        // ¡Sitio perfecto y amplio! Lo ponemos 2 bloques por encima del suelo para que caiga suave
+                        spawnY = (y - 2) * tileSize;
+                        groundFound = true;
+                    }
+
+                    // Independientemente de si había espacio o no, rompemos el bucle.
+                    // Ya hemos tocado el suelo, no queremos seguir buscando bajo tierra y que spawneen en cuevas cerradas.
                     break;
                 }
             }
 
-            // 3. LET THERE BE LIFE!
+            // 3. ¡HÁGASE LA LUZ! (O la oscuridad)
             if (groundFound) {
-                // If the ambient light has little red (less than 100), consider it night
-                bool isNight = (mAmbientLight.r < 100);
+                bool isNight = (mGameTime > (DAY_LENGTH * 0.5f));
                 sf::Vector2f spawnPos(spawnX, spawnY);
 
                 if (isNight) {
                     mMobs.push_back(std::make_unique<Troodon>(spawnPos, mTroodonTexture));
-                    std::cout << "A Troodon lurks in the darkness..." << std::endl;
+                    std::cout << "Un Troodon acecha en la oscuridad en X: " << gridX << std::endl;
                 } else {
                     mMobs.push_back(std::make_unique<Dodo>(spawnPos, mDodoTexture));
-                    std::cout << "A wild Dodo has appeared." << std::endl;
+                    std::cout << "Un Dodo salvaje ha aparecido en X: " << gridX << std::endl;
                 }
             }
         }
     }
 
-    float cycle = std::sin(mGameTime);
-    float brightness = (cycle * 0.4f) + 0.6f;
+    float currentBrightness = (mGameTime > (DAY_LENGTH * 0.5f)) ? 0.0f : 1.0f;
 
     for (auto it = mMobs.begin(); it != mMobs.end(); ) {
 
         auto& mob = **it; // Extract the object to make it easier to read
 
-        mob.update(dt, mPlayer.getPosition(), mWorld, brightness);
+        mob.update(dt, mPlayer.getPosition(), mWorld, currentBrightness);
 
         // --- DOES THE MOB TOUCH THE PLAYER? ---
         if (!mob.isDead() && mob.getBounds().intersects(mPlayer.getGlobalBounds())) {
@@ -1085,6 +1125,38 @@ void Game::update(sf::Time dt) {
 
         if (it->lifetime <= 0.0f) {
             it = mParticles.erase(it); // It disintegrates
+        } else {
+            ++it;
+        }
+    }
+
+    // ==================================================
+    // UPDATE PROJECTILES
+    // ==================================================
+    for (auto it = mProjectiles.begin(); it != mProjectiles.end(); ) {
+        auto& proj = **it;
+        proj.update(dt, mWorld);
+
+        // Si la flecha no ha tocado una pared, comprobamos si toca a un monstruo
+        if (!proj.isDead()) {
+            for (auto& mob : mMobs) {
+                if (!mob->isDead() && proj.getBounds().intersects(mob->getBounds())) {
+                    // Calculamos la dirección del impacto basada en la velocidad de la flecha
+                    float dir = (proj.getVelocity().x > 0) ? 1.0f : -1.0f;
+
+                    if (mob->takeDamage(proj.getDamage(), dir)) {
+                        mSndHit.setPitch(1.2f);
+                        mSndHit.play();
+                        spawnParticles(mob->getPosition(), ItemID::MEAT, 10);
+                        proj.kill(); // La flecha desaparece al clavarse en el monstruo
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (proj.isDead()) {
+            it = mProjectiles.erase(it);
         } else {
             ++it;
         }
@@ -1195,6 +1267,11 @@ void Game::render() {
 
         for (auto& mob : mMobs) {
             mob->render(mWindow, finalAmbient);
+        }
+
+        // Dibujar proyectiles
+        for (auto& proj : mProjectiles) {
+            proj->render(mWindow, finalAmbient);
         }
 
         // ==========================================
@@ -2245,10 +2322,12 @@ void Game::handleMouseRelease(float mx, float my) {
 
                 if (i == 0 && (dragID == ItemID::MEAT || dragID == ItemID::TORCH)) allowed = true; // Up (Consumables)
 
-                else if (i == 1 && (((dragID >= ItemID::DIRT && dragID <= ItemID::TUNGSTEN) && dragID != ItemID::TORCH) || dragID == ItemID::DOOR || dragID == ItemID::CRAFTING_TABLE || dragID == ItemID::FURNACE || dragID == ItemID::CHEST)) allowed = true; // Down (Blocks)
+                // --- CORRECCIÓN: Ahora aceptamos bloques hasta la Nieve (ID 14) ---
+                else if (i == 1 && (((dragID >= ItemID::DIRT && dragID <= ItemID::SNOW) && dragID != ItemID::TORCH) || dragID == ItemID::DOOR || dragID == ItemID::CRAFTING_TABLE || dragID == ItemID::FURNACE || dragID == ItemID::CHEST)) allowed = true; // Down (Blocks)
 
-                else if ((i == 2 || i == 3) && ((dragID >= ItemID::WOOD_PICKAXE && dragID <= ItemID::TUNGSTEN_PICKAXE) || (dragID >= ItemID::WOOD_SWORD && dragID <= ItemID::TUNGSTEN_SWORD))) {
-                    allowed = true; // Sides (Pickaxes and Swords allowed)
+                else if ((i == 2 || i == 3) && ((dragID >= ItemID::WOOD_PICKAXE && dragID <= ItemID::TUNGSTEN_PICKAXE) || (dragID >= ItemID::WOOD_SWORD && dragID <= ItemID::BOW))) {
+                    // --- NUEVO: Aceptamos desde la espada de madera hasta el ARCO ---
+                    allowed = true; // Sides (Pickaxes, Swords and Bows allowed)
                 }
 
                 if (allowed) {

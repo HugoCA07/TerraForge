@@ -41,14 +41,14 @@ void Mob::render(sf::RenderWindow& window, sf::Color ambientLight) {
  * @return True if damage was taken, false if the mob was invulnerable.
  */
 bool Mob::takeDamage(int amount, float knockbackDir) {
-    if (mDamageTimer > 0.0f) return false;
+    if (mDamageTimer > 0.0f) return false; // Ya está invulnerable/aturdido
 
     mHp -= amount;
-    mDamageTimer = 0.3f; // Standard invulnerability time
-    
-    // Standard Knockback
-    mVel.y = -200.0f; 
-    mVel.x = knockbackDir * 200.0f; 
+    mDamageTimer = 0.4f; // Estará aturdido durante 0.4 segundos
+
+    // --- ¡EL EMPUJÓN (KNOCKBACK)! ---
+    mVel.y = -200.0f; // Pequeño salto hacia arriba
+    mVel.x = knockbackDir * 350.0f; // Fuerza bruta hacia atrás
 
     return true;
 }

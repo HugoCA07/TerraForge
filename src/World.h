@@ -43,10 +43,13 @@ public:
 
     // --- NEW: COLLISION HELPER ---
     // Returns true if the block ID is solid (collidable)
-    // Returns true if the block ID is solid (collidable)
-    // Returns true if the block ID is solid (collidable)
     static bool isSolid(int blockID) {
-        // 0 = Air, 4 = Wood (Can be walked through!), 5 = Leaves, 6 = Torch
+        // 0 = Air
+        // 1 = Dirt, 2 = Grass, 3 = Stone
+        // 4 = Wood (Can be walked through!), 5 = Leaves
+        // 6 = Torch
+        // 7-11 = Ores, 12 = Bedrock
+        // 13 = SAND (NEW), 14 = SNOW (NEW)
         // 28, 29, 30 = Open Door
         return (blockID != 0 && blockID != 4 && blockID != 5 && blockID != 6 &&
             blockID != 28 && blockID != 29 && blockID != 30);

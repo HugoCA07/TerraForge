@@ -1,1 +1,14 @@
-CLAUDE.md
+*.exe
+*.o
+*.obj
+*.pdb
+*.ilk
+*.idb
+/build/
+/x64/
+/Debug/
+/Release/
+
+savegame.dat
+
+claude.md

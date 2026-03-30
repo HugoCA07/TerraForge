@@ -65,38 +65,76 @@ void World::generateChunk(int chunkX) {
     int surfaceHeights[CHUNK_WIDTH];
 
     // ---------------------------------------------------------
-    // STEP 1: BASE TERRAIN (Stone, Dirt, and Air only)
+    // STEP 1: BASE TERRAIN & BIOMES (Deserts and Snow)
     // ---------------------------------------------------------
     for (int localX = 0; localX < CHUNK_WIDTH; ++localX) {
         int globalX = (chunkX * CHUNK_WIDTH) + localX;
 
-        // Smooth mountains
+        // 1. CALCULAR LA ALTURA DE LA SUPERFICIE (Igual que antes)
         float n1 = std::sin((globalX + seed) / 50.0f);
         float n2 = std::sin((globalX + seed) / 25.0f) * 0.5f;
         float baseHeight = 80.0f;
-
         int surfaceY = static_cast<int>(baseHeight + ((n1 + n2) * 15.0f));
         surfaceHeights[localX] = surfaceY;
+
+        // 2. CALCULAR LA "HUMEDAD" (El Bioma)
+        // Al restar 100, forzamos a que en la coordenada de Spawn (X=100), el valor del seno sea exactamente 0 (Bioma Normal).
+        // Al dividir por 500.0f (en lugar de 300), hacemos los biomas mucho más anchos y épicos.
+        float biomeValue = std::sin((globalX - 100) / 500.0f);
+
+        bool isDesert = (biomeValue > 0.5f);  // Desierto
+        bool isSnow = (biomeValue < -0.5f);   // Nieve
+        // Si está entre -0.5 y 0.5, es el bioma normal (Pradera/Bosque)
 
         for (int y = 0; y < WORLD_HEIGHT; ++y) {
             int index = y * CHUNK_WIDTH + localX;
             int blockID = 0;
             int bgID = 0;
 
-            // Background
+            // Background Walls
             if (y > surfaceY) {
                 if (y < surfaceY + 10) bgID = 1; // Dirt wall
                 else bgID = 3;                   // Stone wall
             }
 
-            // Foreground
+            // Foreground Blocks
             if (y >= WORLD_HEIGHT - 2) {
                 blockID = 12; // Bedrock
             }
             else if (y >= surfaceY) {
-                if (y == surfaceY) blockID = 2;       // Grass
-                else if (y < surfaceY + 5) blockID = 1; // Dirt
-                else blockID = 3;                     // Stone (NO ORES HERE YET)
+
+                // --- CAPA INFERIOR: PIEDRA Y BOLSAS DE ARENA ---
+                if (y >= surfaceY + 5) {
+                    blockID = 3; // Por defecto es Piedra
+
+                    // Si estamos en un Desierto, generamos las "Bolsas Amarillas"
+                    if (isDesert) {
+                        // Combinamos dos ondas para hacer bolsas cerradas
+                        float pocketX = std::sin((globalX + seed) / 10.0f);
+                        float pocketY = std::cos((y + seed) / 10.0f);
+                        float pocketValue = pocketX * pocketY;
+
+                        // Si el valor matemático es alto (ej. > 0.4), ponemos Arena en vez de Piedra.
+                        // Además, limitamos la profundidad (y < surfaceY + 40) para que la bolsa no llegue al inframundo.
+                        if (pocketValue > 0.4f && y < surfaceY + 40) {
+                            blockID = 13; // ID 13 = Arena
+                        }
+                    }
+                }
+                // --- CAPA SUPERIOR: SUPERFICIE (Hierba, Arena o Nieve) ---
+                else {
+                    if (isDesert) {
+                        blockID = 13; // En el desierto, la superficie es 100% Arena
+                    }
+                    else if (isSnow) {
+                        blockID = 14; // En el bioma frío, la superficie es 100% Nieve
+                    }
+                    else {
+                        // Bioma Normal
+                        if (y == surfaceY) blockID = 2;       // Hierba
+                        else blockID = 1;                     // Tierra
+                    }
+                }
             }
 
             newChunk[index] = blockID;
@@ -240,8 +278,11 @@ void World::generateChunk(int chunkX) {
         int globalX = (chunkX * CHUNK_WIDTH) + localX;
         int surfaceY = surfaceHeights[localX];
 
-        if ((std::abs(globalX * 437) % 100) < 10 && localX > 2 && localX < CHUNK_WIDTH - 3) {
-            int treeHeight = 5 + (rand() % 11); // Altura aleatoria entre 5 y 15 bloques
+        // --- ¡NUEVO! Solo plantamos árboles si el bloque de la superficie es HIERBA (ID 2) ---
+        int surfaceBlockID = newChunk[surfaceY * CHUNK_WIDTH + localX];
+
+        if (surfaceBlockID == 2 && (std::abs(globalX * 437) % 100) < 10 && localX > 2 && localX < CHUNK_WIDTH - 3) {
+            int treeHeight = 5 + (rand() % 11);
             int treeTopY = surfaceY - treeHeight;
 
             // Leaves (Copa del árbol más frondosa)
@@ -568,6 +609,9 @@ void World::loadTextures() {
     loadHeld(33, "assets/Swordiron_hands.png");
     loadHeld(34, "assets/Swordtungsten_hands.png");
 
+    // --- NUEVO: ARCO EN MANO ---
+    loadHeld(35, "assets/Bow_hands.png");
+
     // --- LOAD YOUR ASSETS HERE ---
     // Make sure these files exist in your "assets" folder!
     load(1, "assets/Dirt.png");  // ID 1: Dirt
@@ -582,6 +626,9 @@ void World::loadTextures() {
     load(10, "assets/Cobalt.png"); // ID 10: Cobalt
     load(11, "assets/Tungsten.png"); // ID 11: Tungsten
     load(12, "assets/Bedrock.png"); // ID 12: Bedrock
+    // --- NUEVOS BIOMAS ---
+    load(13, "assets/Sand.png");   // Arena
+    load(14, "assets/Snow.png");   // Nieve
     // DOORS : OPEN - CLOSED
     load(25, "assets/DoorBottomClosed.png"); // ID 25: Door
     load(26, "assets/DoorMidClosed.png"); // ID 25: Door
@@ -619,6 +666,10 @@ void World::loadTextures() {
     load(32, "assets/SwordStone.png");
     load(33, "assets/SwordIron.png");
     load(34, "assets/SwordTungsten.png");
+
+    // --- NUEVO: ARCO Y FLECHA EN INVENTARIO ---
+    load(35, "assets/Bow.png");
+    load(36, "assets/Arrow.png");
 
     // --- MEAT ---
     load(50, "assets/Meat.png");
