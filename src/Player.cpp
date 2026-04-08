@@ -16,6 +16,12 @@ Player::Player()
     , mMaxHp(100)
     , mHp(50)
     , mDamageTimer(0.0f)
+    , mIsBleeding(false)
+    , mBleedTimer(0.0f)
+    , mBleedTickTimer(0.0f)
+    , mIsRegenerating(false)
+    , mRegenTimer(0.0f)
+    , mRegenTickTimer(0.0f)
 {
     if (!mTexture.loadFromFile("assets/Player.png")) {
         std::cerr << "Error: Could not load player.png" << std::endl;
@@ -74,6 +80,7 @@ void Player::handleInput(bool isInventoryOpen) {
  * @param world Reference to the world for collision detection.
  */
 void Player::update(sf::Time dt, World& world) {
+    handleStatusEffects(dt);
     float tileSize = world.getTileSize();
     sf::Vector2f originalPos = mSprite.getPosition();
     sf::FloatRect bounds = mSprite.getGlobalBounds();
@@ -373,6 +380,58 @@ void Player::setArmorAnimTextures(const sf::Texture* head, const sf::Texture* ch
             mArmorAnimSprites[i].setTexture(*mArmorAnimTextures[i]);
             // Origin must match the player's sprite for correct layering
             mArmorAnimSprites[i].setOrigin(mFrameWidth / 2.f, mFrameHeight / 2.f);
+        }
+    }
+}
+
+// ==========================================
+// SISTEMA DE ESTADOS ALTERADOS (BUFFOS/DEBUFFOS)
+// ==========================================
+void Player::applyBleeding(float duration) {
+    mIsBleeding = true;
+    // Si ya estábamos sangrando, sumamos el tiempo (o lo reiniciamos, tú eliges)
+    mBleedTimer = std::max(mBleedTimer, duration);
+}
+
+void Player::applyRegeneration(float duration) {
+    mIsRegenerating = true;
+    mRegenTimer = std::max(mRegenTimer, duration);
+}
+
+void Player::handleStatusEffects(sf::Time dt) {
+    float dtSec = dt.asSeconds();
+
+    // 1. Lógica del Sangrado
+    if (mIsBleeding) {
+        mBleedTimer -= dtSec;
+        mBleedTickTimer += dtSec;
+
+        // Cada 1.5 segundos, pierdes 2 de vida
+        if (mBleedTickTimer >= 1.5f) {
+            mBleedTickTimer = 0.0f;
+            mHp -= 2; // Daño directo que ignora la armadura
+            // Hacemos que brilles en rojo un instante
+            mDamageTimer = 0.2f;
+        }
+
+        if (mBleedTimer <= 0.0f) {
+            mIsBleeding = false;
+        }
+    }
+
+    // 2. Lógica de la Regeneración
+    if (mIsRegenerating) {
+        mRegenTimer -= dtSec;
+        mRegenTickTimer += dtSec;
+
+        // Cada 1.0 segundo, recuperas 1 de vida
+        if (mRegenTickTimer >= 1.0f) {
+            mRegenTickTimer = 0.0f;
+            heal(1); // Usamos tu función heal() para no pasar del máximo
+        }
+
+        if (mRegenTimer <= 0.0f) {
+            mIsRegenerating = false;
         }
     }
 }

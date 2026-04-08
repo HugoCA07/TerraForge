@@ -77,6 +77,11 @@ public:
      */
     void setArmorAnimTextures(const sf::Texture* head, const sf::Texture* chest, const sf::Texture* legs, const sf::Texture* boots);
 
+    // Funciones de Estados
+    void applyBleeding(float duration);
+    void applyRegeneration(float duration);
+    bool isBleeding() const { return mIsBleeding; }
+
 private:
     sf::Texture mTexture;
     sf::Sprite mSprite;
@@ -130,4 +135,16 @@ private:
     bool mHasHitThisSwing = false; // Safety flag for single-hit-per-swing logic
     sf::Sprite mArmorAnimSprites[4]; // Sprites for head, chest, legs, boots
     const sf::Texture* mArmorAnimTextures[4] = {nullptr, nullptr, nullptr, nullptr};
+
+    // --- NUEVO: SISTEMA DE ESTADOS ---
+    bool mIsBleeding;
+    float mBleedTimer;      // Cuánto tiempo dura el sangrado
+    float mBleedTickTimer;  // Temporizador para el daño (ej. 1 daño por segundo)
+
+    bool mIsRegenerating;
+    float mRegenTimer;
+    float mRegenTickTimer;
+
+    // Métodos privados auxiliares
+    void handleStatusEffects(sf::Time dt);
 };

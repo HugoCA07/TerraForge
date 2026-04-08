@@ -210,6 +210,7 @@ Game::Game()
     // Give starting items for testing
     addItemToBackpack(CHEST, 1);
     addItemToBackpack(IRON, 14);
+    addItemToBackpack(MEAT_MEDALLION,1);
 
     // --- LOAD ENTITY TEXTURES ---
     if (!mDodoTexture.loadFromFile("assets/Dodo.png")) std::cerr << "Error: Missing Dodo.png" << std::endl;
@@ -1057,6 +1058,9 @@ void Game::update(sf::Time dt) {
                     sf::Vector2f spawnPos(mPlayer.getPosition().x, mPlayer.getPosition().y - 800.0f); // Drop from sky
                     mMobs.push_back(std::make_unique<TRex>(spawnPos, mTRexTexture));
 
+                    // --- ¡NUEVO! EL MEDALLÓN TE DA REGENERACIÓN (BUFFO) ---
+                    mPlayer.applyRegeneration(10.0f); // 10 segundos curándote
+
                     mSndBreak.setPitch(0.2f); // Deep roar
                     mSndBreak.play();
 
@@ -1209,10 +1213,21 @@ void Game::update(sf::Time dt) {
 
             int finalDamage = std::max(1, mob.getDamage() - totalDefense); // Minimum 1 damage
 
+            // We pass the reduced damage to the player!
             if (mPlayer.takeDamage(finalDamage, dir)) {
                 mSndHit.setPitch(0.7f);
                 mSndHit.play();
-                std::cout << "Hit! Raw: " << mob.getDamage() << " | Blocked: " << totalDefense << " | Taken: " << finalDamage << std::endl;
+                std::cout << "Golpe recibido! Daño original: " << mob.getDamage()
+                          << " | Bloqueado: " << totalDefense
+                          << " | Daño final: " << finalDamage << std::endl;
+
+                // --- ¡NUEVO! PROBABILIDAD DE SANGRADO ---
+                // Si el ataque te hizo más de 5 de daño (no lo paró tu armadura del todo)
+                // y es de noche (probabilidad más alta con bichos peligrosos)
+                if (finalDamage > 5 && (rand() % 100) < 30) { // 30% de probabilidad
+                    mPlayer.applyBleeding(6.0f); // 6 segundos de sangrado
+                    std::cout << "[ESTADO] ¡Estás sangrando! Busca curación." << std::endl;
+                }
             }
         }
 
@@ -1259,6 +1274,16 @@ void Game::update(sf::Time dt) {
 
         if (proj.isDead()) it = mProjectiles.erase(it);
         else ++it;
+    }
+
+    // --- EFECTOS VISUALES DE LOS ESTADOS ---
+    // Si el jugador sangra, suelta partículas de sangre al caminar
+    if (mPlayer.isBleeding()) {
+        // Solo un 10% de probabilidad por frame para no saturar la pantalla
+        if (rand() % 100 < 10) {
+            sf::Vector2f playerCenter = mPlayer.getCenter();
+            spawnParticles(playerCenter, ItemID::MEAT, 1); // La carne suelta partículas rojas
+        }
     }
 }
 
