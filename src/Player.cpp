@@ -1,10 +1,11 @@
 #include "Player.h"
 #include <iostream>
 #include <cmath>
+#include <algorithm> // For std::min
 
 /**
- * Constructor for the Player class.
- * Initializes the player's attributes, loads the texture, and sets up the sprite.
+ * @brief Constructor for the Player class.
+ * Initializes attributes, loads textures, and configures sprites.
  */
 Player::Player()
     : mVelocity(0.f, 0.f)
@@ -16,13 +17,13 @@ Player::Player()
     , mHp(50)
     , mDamageTimer(0.0f)
 {
-    if (!mTexture.loadFromFile("assets/player.png")) {
+    if (!mTexture.loadFromFile("assets/Player.png")) {
         std::cerr << "Error: Could not load player.png" << std::endl;
     }
     mTexture.setSmooth(false);
     mSprite.setTexture(mTexture);
 
-    // Calculate exact size by dividing by rows and columns
+    // Calculate frame dimensions from the spritesheet
     int numRows = 4;
     mFrameWidth = mTexture.getSize().x / mNumFrames;
     mFrameHeight = mTexture.getSize().y / numRows;
@@ -31,87 +32,75 @@ Player::Player()
     mSprite.setOrigin(mFrameWidth / 2.f, mFrameHeight / 2.f);
     mSprite.setScale(1.25f, 1.25f);
     mSprite.setPosition(100.f, 1000.f);
-    mWeaponTexture.setSmooth(false); // <--- Vital for pixel art
+
+    mWeaponTexture.setSmooth(false); // Vital for pixel art
     mWeaponSprite.setTexture(mWeaponTexture);
-
-    // We set the pivot at the very bottom and centered (exactly where the stick is held)
+    // Set pivot to the bottom center of the weapon (where the handle is)
     mWeaponSprite.setOrigin(mWeaponTexture.getSize().x / 2.0f, mWeaponTexture.getSize().y);
-
-    // We give it the same scale as your character (1.25f)
     mWeaponSprite.setScale(1.25f, 1.25f);
 }
 
 /**
- * Handles player input (keyboard).
- * Updates velocity based on key presses (A, D, Space).
+ * @brief Handles player input for movement and combat initiation.
+ * @param isInventoryOpen Disables most actions if the inventory is open.
  */
-void Player::handleInput(bool isInventoryOpen) { // <--- ADD PARAMETER HERE
-    mMoveDirection = 0.0f; // By default we don't move
+void Player::handleInput(bool isInventoryOpen) {
+    mMoveDirection = 0.0f; // Reset movement intention
 
-    // We can only move, jump or attack if we are NOT in the middle of a hit
+    // Player can only move, jump, or attack if not already in a combat animation
     if (mCombatState == CombatState::None) {
-
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) {
-            mMoveDirection = -1.0f;
-        }
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) {
-            mMoveDirection = 1.0f;
-        }
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) mMoveDirection = -1.0f;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) mMoveDirection = 1.0f;
 
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::Space) && mIsGrounded) {
-            float jumpPower = mIsOverweight ? -350.0f : -500.0f;
+            float jumpPower = mIsOverweight ? -350.0f : JUMP_FORCE;
             mVelocity.y = jumpPower;
             mIsGrounded = false;
         }
 
-        // START ATTACK (Left Click)
-        // --- NEW! We only attack if the inventory is CLOSED ---
+        // Start attack sequence on Left Click if inventory is closed
         if (!isInventoryOpen && sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
             mCombatState = CombatState::Windup;
             mCombatTimer = 0.0f;
-            mVelocity.x = 0.0f; // Stop dead when starting to attack
+            mVelocity.x = 0.0f; // Stop moving to start the attack
             std::cout << "[COMBAT] Preparing strike..." << std::endl;
         }
     }
 }
 
 /**
- * Updates the player's state.
- * Handles movement, physics (gravity), collisions, and animation.
- * @param dt Delta time (time elapsed since last frame).
- * @param world Reference to the game world for collision detection.
+ * @brief Updates player state, including combat, physics, and animation.
+ * @param dt Delta time for frame-independent calculations.
+ * @param world Reference to the world for collision detection.
  */
 void Player::update(sf::Time dt, World& world) {
     float tileSize = world.getTileSize();
     sf::Vector2f originalPos = mSprite.getPosition();
     sf::FloatRect bounds = mSprite.getGlobalBounds();
-
-    float skinW = 4.0f;
-    float skinH = 0.5f;
+    float skinW = 4.0f, skinH = 0.5f; // Hitbox skin to prevent getting stuck
 
     // ==========================================
-    // 1. THINK: COMBAT STATE MACHINE
+    // 1. COMBAT STATE MACHINE
     // ==========================================
     if (mCombatState != CombatState::None) {
         mCombatTimer += dt.asSeconds();
 
-        if (mCombatState == CombatState::Windup) {
-            // Phase 1: Raising the weapon (0.2 seconds)
+        if (mCombatState == CombatState::Windup) { // Phase 1: Raising weapon
             if (mCombatTimer >= 0.2f) {
                 mCombatState = CombatState::Active;
                 mCombatTimer = 0.0f;
-                mHasHitThisSwing = false; // <--- NEW! We remove the safety lock when swinging
+                mHasHitThisSwing = false; // Reset hit flag for the new swing
                 std::cout << "[COMBAT] WHAM! Active hit." << std::endl;
             }
         }
-        else if (mCombatState == CombatState::Active) {
+        else if (mCombatState == CombatState::Active) { // Phase 2: Damage window
             if (mCombatTimer >= 0.1f) {
                 mCombatState = CombatState::Recovery;
                 mCombatTimer = 0.0f;
                 std::cout << "[COMBAT] Recovering balance..." << std::endl;
             }
         }
-        else if (mCombatState == CombatState::Recovery) {
+        else if (mCombatState == CombatState::Recovery) { // Phase 3: Cooldown
             if (mCombatTimer >= 0.3f) {
                 mCombatState = CombatState::None;
                 mCombatTimer = 0.0f;
@@ -121,373 +110,269 @@ void Player::update(sf::Time dt, World& world) {
     }
 
     // ==========================================
-    // 1.5 VISUALES DEL ARMA (COREOGRAFÍA Y REPOSO)
+    // 1.5 WEAPON VISUALS (CHOREOGRAPHY & IDLE)
     // ==========================================
-    // Comprobamos si tiene un Pico/Espada, o si tiene el Arco (ID 41)
-    bool isHoldingMelee = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
-                          (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
-
-    // --- ¡CORREGIDO! Ahora el arco es el 35 ---
+    bool isHoldingMelee = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) || (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
     bool isHoldingBow = (mEquippedWeaponID == 35);
 
-    // --- ¡AQUÍ ESTABA EL FALLO! Ahora entra si es Melee O si es Arco ---
     if (isHoldingMelee || isHoldingBow) {
-        // 1. PEDIMOS LA TEXTURA DE MANO AL MUNDO
         const sf::Texture* tex = world.getHeldTexture(mEquippedWeaponID);
-
-        if (tex) {
-            if (mWeaponSprite.getTexture() != tex) {
-                mWeaponSprite.setTexture(*tex, true);
-
-                // El origen depende del arma
-                if (isHoldingBow) {
-                    // El arco lo agarramos justo por el centro
-                    mWeaponSprite.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
-                } else {
-                    // Espadas y picos por la empuñadura baja
-                    mWeaponSprite.setOrigin(tex->getSize().x * 0.15f, tex->getSize().y * 0.75f);
-                }
+        if (tex && mWeaponSprite.getTexture() != tex) {
+            mWeaponSprite.setTexture(*tex, true);
+            // Set origin based on weapon type
+            if (isHoldingBow) {
+                mWeaponSprite.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f); // Center grip
+            } else {
+                mWeaponSprite.setOrigin(tex->getSize().x * 0.15f, tex->getSize().y * 0.75f); // Handle grip
             }
         }
 
         float facingDir = (mSprite.getScale().x > 0) ? 1.0f : -1.0f;
-
-        // --- OFFSETS Y ESCALA ---
         float handOffsetX = 22.0f * facingDir;
         float handOffsetY = 5.0f;
-
         mWeaponSprite.setPosition(mSprite.getPosition().x + handOffsetX, mSprite.getPosition().y + handOffsetY);
         mWeaponSprite.setScale(0.85f * facingDir, 0.85f);
 
-        // ==========================================
-        // 3. COREOGRAFÍA PROFESIONAL (EASING MATHS)
-        // ==========================================
+        // --- WEAPON SWING/DRAW CHOREOGRAPHY (USING EASING MATH) ---
         if (mCombatState != CombatState::None) {
-
-            if (mCombatState == CombatState::Windup) {
-                // FASE 1: LEVANTAR / TENSAR
+            if (mCombatState == CombatState::Windup) { // Phase 1: Windup / Draw
                 float progress = mCombatTimer / 0.2f;
-                float ease = 1.0f - std::pow(1.0f - progress, 3.0f);
-
-                if (isHoldingMelee) {
-                    mWeaponSprite.setRotation(-70.0f * ease * facingDir);
-                } else if (isHoldingBow) {
-                    // El arco pasa de estar vertical (90º) a apuntar hacia adelante (0º)
-                    mWeaponSprite.setRotation((90.0f - (90.0f * ease)) * facingDir);
-                }
+                float ease = 1.0f - std::pow(1.0f - progress, 3.0f); // EaseOutCubic
+                if (isHoldingMelee) mWeaponSprite.setRotation(-70.0f * ease * facingDir);
+                else if (isHoldingBow) mWeaponSprite.setRotation((90.0f - (90.0f * ease)) * facingDir);
             }
-            else if (mCombatState == CombatState::Active) {
-                // FASE 2: IMPACTO / DISPARO
+            else if (mCombatState == CombatState::Active) { // Phase 2: Swing / Shoot
                 float progress = mCombatTimer / 0.1f;
-
                 if (isHoldingMelee) {
-                    float ease = std::pow(progress, 3.0f);
+                    float ease = std::pow(progress, 3.0f); // EaseInCubic
                     float currentRot = -70.0f + (170.0f * ease);
-                    float spin = 0.0f;
-                    if (progress > 0.8f) {
-                        float impactProg = (progress - 0.8f) / 0.2f;
-                        spin = std::pow(impactProg, 2.0f) * 15.0f;
-                    }
+                    float spin = (progress > 0.8f) ? std::pow((progress - 0.8f) / 0.2f, 2.0f) * 15.0f : 0.0f;
                     mWeaponSprite.setRotation((currentRot + spin) * facingDir);
                 } else if (isHoldingBow) {
-                    // ¡NUEVO! Al disparar, la cuerda pega un latigazo. Hacemos que vibre matemáticamente.
-                    float vibration = std::sin(progress * 30.0f) * 8.0f;
+                    float vibration = std::sin(progress * 30.0f) * 8.0f; // Bowstring vibration
                     mWeaponSprite.setRotation(vibration * facingDir);
                 }
             }
-            else if (mCombatState == CombatState::Recovery) {
-                // FASE 3: RECUPERAR EQUILIBRIO
+            else if (mCombatState == CombatState::Recovery) { // Phase 3: Recover
                 float progress = mCombatTimer / 0.3f;
-                float ease = 1.0f - std::pow(1.0f - progress, 2.0f);
-
-                if (isHoldingMelee) {
-                    mWeaponSprite.setRotation((100.0f - (100.0f * ease)) * facingDir);
-                } else if (isHoldingBow) {
-                    // El arco vuelve a bajar suavemente a su posición vertical (90º)
-                    mWeaponSprite.setRotation((90.0f * ease) * facingDir);
-                }
+                float ease = 1.0f - std::pow(1.0f - progress, 2.0f); // EaseOutQuad
+                if (isHoldingMelee) mWeaponSprite.setRotation((100.0f - (100.0f * ease)) * facingDir);
+                else if (isHoldingBow) mWeaponSprite.setRotation((90.0f * ease) * facingDir);
             }
-        }
-        else {
-            // REPOSO
-            if (isHoldingMelee) {
-                mWeaponSprite.setRotation(5.0f * facingDir);
-            } else if (isHoldingBow) {
-                mWeaponSprite.setRotation(90.0f * facingDir); // El arco descansa en vertical
-            }
+        } else { // Idle Pose
+            if (isHoldingMelee) mWeaponSprite.setRotation(5.0f * facingDir);
+            else if (isHoldingBow) mWeaponSprite.setRotation(90.0f * facingDir); // Bow held vertically
         }
     }
 
     // ==========================================
-    // 2. THINK: FLUID MOVEMENT (INERTIA AND FRICTION)
+    // 2. FLUID MOVEMENT (INERTIA AND FRICTION)
     // ==========================================
     float maxSpd = mIsOverweight ? 60.0f : mMaxSpeed;
-
     if (mMoveDirection != 0.0f) {
-        // Accelerate towards the pressed direction
         mVelocity.x += mMoveDirection * mAcceleration * dt.asSeconds();
-        // Limit to max speed
-        if (mVelocity.x > maxSpd) mVelocity.x = maxSpd;
-        if (mVelocity.x < -maxSpd) mVelocity.x = -maxSpd;
+        mVelocity.x = std::clamp(mVelocity.x, -maxSpd, maxSpd);
     } else {
-        // Friction: Slow down gradually when keys are released
-        if (mVelocity.x > 0.0f) {
-            mVelocity.x -= mFriction * dt.asSeconds();
-            if (mVelocity.x < 0.0f) mVelocity.x = 0.0f;
-        } else if (mVelocity.x < 0.0f) {
-            mVelocity.x += mFriction * dt.asSeconds();
-            if (mVelocity.x > 0.0f) mVelocity.x = 0.0f;
-        }
+        if (mVelocity.x > 0.0f) mVelocity.x = std::max(0.0f, mVelocity.x - mFriction * dt.asSeconds());
+        else if (mVelocity.x < 0.0f) mVelocity.x = std::min(0.0f, mVelocity.x + mFriction * dt.asSeconds());
     }
-
-    // Gravity
     mVelocity.y += GRAVITY * dt.asSeconds();
 
     // ==========================================
-    // 3. MOVE AND COLLIDE: COLLISION HELPER FUNCTION
+    // 3. COLLISION DETECTION & RESPONSE
     // ==========================================
     auto checkCollision = [&](sf::FloatRect rect) -> bool {
         int left   = static_cast<int>(std::floor(rect.left / tileSize));
         int right  = static_cast<int>(std::floor((rect.left + rect.width) / tileSize));
         int top    = static_cast<int>(std::floor(rect.top / tileSize));
         int bottom = static_cast<int>(std::floor((rect.top + rect.height) / tileSize));
-
         for (int x = left; x <= right; ++x) {
             for (int y = top; y <= bottom; ++y) {
-                int blockID = world.getBlock(x, y);
-                if (world.isSolid(blockID)) { return true; }
+                if (world.isSolid(world.getBlock(x, y))) return true;
             }
         }
         return false;
     };
 
-    // --- X AXIS (Horizontal) ---
+    // --- X-AXIS COLLISION ---
     float dx = mVelocity.x * dt.asSeconds();
     mSprite.move(dx, 0.f);
-
     sf::FloatRect hitboxX = mSprite.getGlobalBounds();
     hitboxX.left += skinW; hitboxX.width -= (skinW * 2);
     hitboxX.top += skinH; hitboxX.height -= (skinH * 2);
 
     if (checkCollision(hitboxX)) {
-        float stepHeight = tileSize + 2.0f;
+        // Auto-step logic
+        float stepHeight = tileSize + 0.1f;
         sf::FloatRect stepHitbox = hitboxX;
         stepHitbox.top -= stepHeight;
-
         if (!checkCollision(stepHitbox)) {
-            mSprite.move(0.f, -stepHeight); // Auto-climb
+            mSprite.move(0.f, -stepHeight);
         } else {
-            mSprite.setPosition(originalPos.x, mSprite.getPosition().y); // Hit wall
-            mVelocity.x = 0.0f; // <--- IMPORTANT: Stop dead on impact
+            mSprite.setPosition(originalPos.x, mSprite.getPosition().y);
+            mVelocity.x = 0.0f; // Stop on wall impact
         }
     }
 
-    // --- Y AXIS (Vertical) ---
+    // --- Y-AXIS COLLISION ---
     float dy = mVelocity.y * dt.asSeconds();
     mSprite.move(0.f, dy);
-
     sf::FloatRect hitboxY = mSprite.getGlobalBounds();
     hitboxY.left += skinW; hitboxY.width -= (skinW * 2);
 
     if (checkCollision(hitboxY)) {
-        if (mVelocity.y > 0) { // Touching ground
+        if (mVelocity.y > 0) { // Hitting ground
             float playerBottom = hitboxY.top + hitboxY.height;
             int blockY = static_cast<int>(std::floor(playerBottom / tileSize));
             float newY = (blockY * tileSize) - bounds.height;
-
-            if (std::abs(mSprite.getPosition().y - newY) < tileSize) {
-                mSprite.setPosition(mSprite.getPosition().x, newY);
-            } else {
-                mSprite.move(0.f, -dy);
-            }
+            if (std::abs(mSprite.getPosition().y - newY) < tileSize) mSprite.setPosition(mSprite.getPosition().x, newY);
+            else mSprite.move(0.f, -dy);
             mVelocity.y = 0;
             mIsGrounded = true;
         }
-        else if (mVelocity.y < 0) { // Hitting ceiling (Headbutt)
+        else if (mVelocity.y < 0) { // Hitting ceiling
             mSprite.move(0.f, -dy);
             mVelocity.y = 0;
         }
     } else {
-        mIsGrounded = false; // We are in the air
+        mIsGrounded = false;
     }
 
     // ==========================================
-    // 4. ANIMATE AND DRAW
+    // 4. ANIMATION & VISUALS
     // ==========================================
-    // Damage
     if (mDamageTimer > 0.0f) {
         mDamageTimer -= dt.asSeconds();
-        mSprite.setColor(sf::Color(255, 100, 100));
+        mSprite.setColor(sf::Color(255, 100, 100)); // Damage flash
     } else {
         mSprite.setColor(sf::Color::White);
     }
 
-    // ==========================================
-    // DECIDE ANIMATION (Depends on movement and weapon)
-    // ==========================================
-    // Creamos una nueva variable temporal que incluya al arco (35)
-    bool hasWeaponAnim = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
-                         (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 35);
+    // Decide animation based on movement and equipped weapon
+    bool hasWeaponAnim = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 35);
+    mCurrentState = (std::abs(mVelocity.x) > 10.0f) ? AnimState::Walk : AnimState::Idle;
+    mCurrentRow = (mCurrentState == AnimState::Idle) ? (hasWeaponAnim ? 2 : 0) : (hasWeaponAnim ? 3 : 1);
 
-    if (std::abs(mVelocity.x) > 10.0f) {
-        mCurrentState = AnimState::Walk;
-        // Usamos la nueva variable
-        mCurrentRow = hasWeaponAnim ? 3 : 1;
-    } else {
-        mCurrentState = AnimState::Idle;
-        // Usamos la nueva variable
-        mCurrentRow = hasWeaponAnim ? 2 : 0;
-    }
-
-    // Player
     mAnimTimer += dt.asSeconds();
     float timePerFrame = (mCurrentState == AnimState::Walk) ? 0.1f : 0.25f;
-
     if (mAnimTimer >= timePerFrame) {
         mAnimTimer = 0.0f;
-        mCurrentFrame++;
-        if (mCurrentFrame >= mNumFrames) mCurrentFrame = 0;
+        mCurrentFrame = (mCurrentFrame + 1) % mNumFrames;
     }
 
-    mSprite.setTextureRect(sf::IntRect(
-        mCurrentFrame * mFrameWidth,
-        mCurrentRow * mFrameHeight,
-        mFrameWidth,
-        mFrameHeight
-    ));
+    sf::IntRect animRect(mCurrentFrame * mFrameWidth, mCurrentRow * mFrameHeight, mFrameWidth, mFrameHeight);
+    mSprite.setTextureRect(animRect);
 
-    // ---------------------------------------------------------
-    // FLIP (TURN) - Corrected!
-    // ---------------------------------------------------------
+    // Sync armor layers with player animation
+    for (int i = 0; i < 4; ++i) {
+        if (mArmorAnimTextures[i] != nullptr) {
+            mArmorAnimSprites[i].setTextureRect(animRect);
+        }
+    }
+
+    // Flip sprite based on movement direction
     float scale = 1.25f;
-
-    // We use mMoveDirection (keyboard intent) instead of mVelocity (physics)
-    if (mMoveDirection > 0) {
-        mSprite.setScale(scale, scale);
-    }
-    else if (mMoveDirection < 0) {
-        mSprite.setScale(-scale, scale);
-    }
+    if (mMoveDirection > 0) mSprite.setScale(scale, scale);
+    else if (mMoveDirection < 0) mSprite.setScale(-scale, scale);
 }
 
 /**
- * Renders the player to the window.
- * Applies the current light color to the player sprite.
- * @param window The render window.
- * @param lightColor The current light color (for day/night cycle).
+ * @brief Renders the player, armor layers, and held weapon.
+ * @param window The SFML RenderWindow to draw on.
+ * @param lightColor The calculated ambient light color.
  */
 void Player::render(sf::RenderWindow& window, sf::Color lightColor) {
-    // Draw the player
+    // 1. Draw player body
     mSprite.setColor(lightColor);
     window.draw(mSprite);
 
-    // --- NEW: ALWAYS draw the weapon if equipped ---
-    bool isHoldingWeapon = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) ||
-                           (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 35); // <--- ¡CAMBIADO DE 34 A 35!
+    // 2. Draw armor layers on top
+    for (int i = 0; i < 4; ++i) {
+        if (mArmorAnimTextures[i] != nullptr) {
+            mArmorAnimSprites[i].setPosition(mSprite.getPosition());
+            mArmorAnimSprites[i].setScale(mSprite.getScale());
+            mArmorAnimSprites[i].setColor(lightColor);
+            window.draw(mArmorAnimSprites[i]);
+        }
+    }
 
+    // 3. Draw weapon on top of everything
+    bool isHoldingWeapon = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 35);
     if (isHoldingWeapon) {
-        // We apply the ambient light color (+ a touch of brightness)
         sf::Color weaponColor = lightColor;
         weaponColor.r = std::min(255, weaponColor.r + 30);
         weaponColor.g = std::min(255, weaponColor.g + 30);
         weaponColor.b = std::min(255, weaponColor.b + 30);
-
         mWeaponSprite.setColor(weaponColor);
         window.draw(mWeaponSprite);
     }
 }
 
 /**
- * Gets the center position of the player.
- * @return The center coordinates of the player sprite.
+ * @brief Gets the absolute center coordinates of the player sprite.
  */
 sf::Vector2f Player::getCenter() const {
-    // Calculate the absolute center of the sprite in the game world.
     sf::FloatRect bounds = mSprite.getGlobalBounds();
-    return sf::Vector2f(
-        bounds.left + bounds.width / 2.0f,
-        bounds.top + bounds.height / 2.0f
-    );
+    return sf::Vector2f(bounds.left + bounds.width / 2.0f, bounds.top + bounds.height / 2.0f);
 }
 
-/**
- * Sets the player's position.
- * @param pos The new position.
- */
 void Player::setPosition(sf::Vector2f pos) {
     mSprite.setPosition(pos);
 }
 
 /**
- * Heals the player by a specified amount.
- * Ensures health does not exceed the maximum.
- * @param amount The amount of health to restore.
+ * @brief Restores player health, capped at max HP.
  */
 void Player::heal(int amount) {
-    mHp += amount;
-    if (mHp > mMaxHp) {
-        mHp = mMaxHp; // Never have more than the maximum
-    }
+    mHp = std::min(mMaxHp, mHp + amount);
 }
 
 /**
- * Applies damage to the player.
- * Handles invulnerability frames and knockback.
- * @param amount The amount of damage to take.
- * @param knockbackDir The direction of the knockback (-1.0f for left, 1.0f for right).
- * @return True if damage was taken, false if the player was invulnerable.
+ * @brief Applies damage and knockback to the player.
+ * @return True if damage was taken, false if invulnerable.
  */
 bool Player::takeDamage(int amount, float knockbackDir) {
-    // If we are still invulnerable from the previous hit, ignore this one
-    if (mDamageTimer > 0.0f) return false;
-
+    if (mDamageTimer > 0.0f) return false; // Invulnerable
     mHp -= amount;
-    mDamageTimer = 1.0f; // 1 second of invulnerability after a hit
-
-    // Knockback to make the attack feel impactful
+    mDamageTimer = 1.0f; // 1 second of invulnerability
     mVelocity.y = -250.0f;
     mVelocity.x = knockbackDir * 300.0f;
-
-    // Limit minimum health to 0
     if (mHp < 0) mHp = 0;
-
-    return true; // Hit received successfully
+    return true;
 }
 
+/**
+ * @brief Calculates the hitbox for the player's melee attack.
+ */
 sf::FloatRect Player::getWeaponHitbox() const {
     float facingDir = (mSprite.getScale().x > 0) ? 1.0f : -1.0f;
-
-    // ==========================================
-    // NEW HITBOX CONFIGURATION (Like your image)
-    // ==========================================
-
-    // WIDTH (Forward reach):
-    // I set it to 75px. It's quite long to match the mining reach!
-    // Your characterScaledWidth is ~20px, so this reaches 3 times further.
     float hitboxWidth = 75.0f;
-
-    // HEIGHT: 55px. Covers from the chest down to the knees.
     float hitboxHeight = 55.0f;
-
-    sf::Vector2f playerPos = mSprite.getPosition(); // Remember: The origin is the CENTER.
-
-    // --- X POSITION CALCULATION (Horizontal) ---
-    // We want the box to start slightly *behind* the extended fist,
-    // in the shoulder/chest area, so you don't miss enemies right in front of you.
-    // We use a 5px offset from the center.
+    sf::Vector2f playerPos = mSprite.getPosition();
     float horizontalOffsetFromCenter = 5.0f * facingDir;
-
-    float xPos = 0.0f;
-    if (facingDir > 0) { // Facing Right
-        xPos = playerPos.x + horizontalOffsetFromCenter;
-    } else { // Facing Left (We subtract the width to calculate the left corner)
-        xPos = playerPos.x + horizontalOffsetFromCenter - hitboxWidth;
-    }
-
-    // --- Y POSITION CALCULATION (Vertical) ---
-    // Remember: The origin is the WAIST (Belly button). In SFML, Y goes up by subtracting.
-    // We raise the box 25px to align the top with the shoulder/chest.
+    float xPos = (facingDir > 0) ? (playerPos.x + horizontalOffsetFromCenter) : (playerPos.x + horizontalOffsetFromCenter - hitboxWidth);
     float yPos = playerPos.y - 25.0f;
-
     return sf::FloatRect(xPos, yPos, hitboxWidth, hitboxHeight);
+}
+
+/**
+ * @brief Sets the textures for the animated armor layers.
+ * @param head Helmet texture.
+ * @param chest Chestplate texture.
+ * @param legs Leggings texture.
+ * @param boots Boots texture.
+ */
+void Player::setArmorAnimTextures(const sf::Texture* head, const sf::Texture* chest, const sf::Texture* legs, const sf::Texture* boots) {
+    mArmorAnimTextures[0] = head;
+    mArmorAnimTextures[1] = chest;
+    mArmorAnimTextures[2] = legs;
+    mArmorAnimTextures[3] = boots;
+
+    for (int i = 0; i < 4; ++i) {
+        if (mArmorAnimTextures[i] != nullptr) {
+            mArmorAnimSprites[i].setTexture(*mArmorAnimTextures[i]);
+            // Origin must match the player's sprite for correct layering
+            mArmorAnimSprites[i].setOrigin(mFrameWidth / 2.f, mFrameHeight / 2.f);
+        }
+    }
 }

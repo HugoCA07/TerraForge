@@ -1,7 +1,7 @@
 #include "Mob.h"
 
 /**
- * Constructor for the Mob class.
+ * @brief Constructor for the Mob class.
  * Initializes the mob's position, texture, health, and other base attributes.
  * @param startPos The initial position of the mob.
  * @param texture The texture to be used for the mob's sprite.
@@ -19,7 +19,7 @@ Mob::Mob(sf::Vector2f startPos, const sf::Texture& texture, int maxHp)
 }
 
 /**
- * Renders the mob to the window.
+ * @brief Renders the mob to the window.
  * Applies a red tint if the mob has recently taken damage.
  * @param window The render window.
  * @param ambientLight The current ambient light color (for day/night cycle).
@@ -34,21 +34,21 @@ void Mob::render(sf::RenderWindow& window, sf::Color ambientLight) {
 }
 
 /**
- * Applies damage to the mob.
+ * @brief Applies damage to the mob.
  * Handles invulnerability frames and knockback.
  * @param amount The amount of damage to take.
  * @param knockbackDir The direction of the knockback (-1.0f for left, 1.0f for right).
  * @return True if damage was taken, false if the mob was invulnerable.
  */
 bool Mob::takeDamage(int amount, float knockbackDir) {
-    if (mDamageTimer > 0.0f) return false; // Ya está invulnerable/aturdido
+    if (mDamageTimer > 0.0f) return false; // Already invulnerable/stunned
 
     mHp -= amount;
-    mDamageTimer = 0.4f; // Estará aturdido durante 0.4 segundos
+    mDamageTimer = 0.4f; // Will be stunned for 0.4 seconds
 
-    // --- ¡EL EMPUJÓN (KNOCKBACK)! ---
-    mVel.y = -200.0f; // Pequeño salto hacia arriba
-    mVel.x = knockbackDir * 350.0f; // Fuerza bruta hacia atrás
+    // --- KNOCKBACK IMPULSE ---
+    mVel.y = -200.0f; // Small vertical jump
+    mVel.x = knockbackDir * 350.0f; // Strong horizontal force backwards
 
     return true;
 }

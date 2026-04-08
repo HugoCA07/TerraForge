@@ -5,88 +5,138 @@
 #include <cmath>
 #include <fstream>
 
-// Define Chunk size (e.g., 16 blocks wide)
+// World generation constants
 const int CHUNK_WIDTH = 16;
 const int WORLD_HEIGHT = 150; // Fixed vertical height (Sky to Bedrock)
 
+/**
+ * @struct ItemDrop
+ * @brief Represents an item physically dropped in the game world.
+ */
 struct ItemDrop {
-    int id; // Block ID
+    int id;           // Item/Block ID
     sf::Vector2f pos; // Drop position
-    sf::Vector2f vel; // Drop velocity
-    float timeAlive;
+    sf::Vector2f vel; // Physical velocity for tossing/bouncing
+    float timeAlive;  // Time elapsed since dropped (for despawning/floating animation)
 };
 
+/**
+ * @class World
+ * @brief Manages procedural generation, block data, rendering, and dropped items.
+ *
+ * Uses an infinite horizontal chunk system. Chunks are generated on the fly
+ * as the player requests blocks outside previously loaded areas.
+ */
 class World {
 public:
-    World(); // Default constructor
+    /**
+     * @brief Constructs a new World object.
+     * Sets tile sizes and loads textures.
+     */
+    World();
 
-    // Renders the visible portion of the world based on the camera view (culling)
+    /**
+     * @brief Renders the visible portion of the world (culling) and dropped items.
+     * @param window The render window.
+     * @param ambientColor The global ambient light color for coloring blocks.
+     */
     void render(sf::RenderWindow& window, sf::Color ambientColor);
 
-    // Gets the block type at a specific coordinate, generating the chunk if it doesn't exist
+    /**
+     * @brief Gets the block type at a specific coordinate.
+     * Generates the chunk automatically if it doesn't exist.
+     * @param x Global grid X coordinate.
+     * @param y Global grid Y coordinate.
+     * @return The ID of the block at that location.
+     */
     int getBlock(int x, int y);
-    // Sets the block type at a specific coordinate
+
+    /**
+     * @brief Sets the block type at a specific coordinate.
+     * @param x Global grid X coordinate.
+     * @param y Global grid Y coordinate.
+     * @param type The new ItemID for the block (0 for Air).
+     */
     void setBlock(int x, int y, int type);
 
     float getTileSize() const { return mTileSize; }
-    // Gets the texture for a given block ID, used for the UI hotbar
+
+    /**
+     * @brief Gets the UI icon texture for a specific ItemID.
+     */
     const sf::Texture* getTexture(int id) const;
 
-    // Move and get items
+    /**
+     * @brief Gets the specialized texture for rendering a tool held in the player's hand.
+     */
+    const sf::Texture* getHeldTexture(int id) const;
+
+    /**
+     * @brief Gets the spritesheet texture for animated armor layers.
+     */
+    const sf::Texture* getArmorAnimTexture(int id) const;
+
+    /**
+     * @brief Updates physics for dropped items and handles player pickup.
+     * @param dt Time elapsed since the last frame.
+     * @param playerPos The center position of the player for pickup radius detection.
+     * @param inventory Reference to the temporary pickup map sent back to Game.cpp.
+     */
     void update(sf::Time dt, sf::Vector2f playerPos, std::map<int, int>& inventory);
-    // --- NEW: SAVE AND LOAD ---
-    // Receive the open file from Game.cpp to write/read its data
+
+    // --- SAVE AND LOAD ---
     void saveToStream(std::ofstream& file);
     void loadFromStream(std::ifstream& file);
+
+    /**
+     * @brief Spawns an item drop at an exact pixel position.
+     */
     void spawnItem(int id, sf::Vector2f pos);
+
+    /**
+     * @brief Spawns an item drop at a grid coordinate (centered).
+     */
     void spawnItem(int x, int y, int id);
 
-    // --- NEW: COLLISION HELPER ---
-    // Returns true if the block ID is solid (collidable)
+    /**
+     * @brief Static helper to check if a given block ID has physical collision.
+     * @param blockID The ID of the block to check.
+     * @return True if the block is solid (collidable), false if passable (Air, Wood background, Open doors).
+     */
     static bool isSolid(int blockID) {
-        // 0 = Air
-        // 1 = Dirt, 2 = Grass, 3 = Stone
-        // 4 = Wood (Can be walked through!), 5 = Leaves
-        // 6 = Torch
-        // 7-11 = Ores, 12 = Bedrock
-        // 13 = SAND (NEW), 14 = SNOW (NEW)
-        // 28, 29, 30 = Open Door
+        // Air(0), Wood/Trunks(4), Leaves(5), Torches(6), Open Doors(28,29,30) are passable.
         return (blockID != 0 && blockID != 4 && blockID != 5 && blockID != 6 &&
             blockID != 28 && blockID != 29 && blockID != 30);
     }
 
-    // Gets the LARGE texture designed for the player's hand
-    const sf::Texture* getHeldTexture(int id) const;
 private:
-    // --- GENERATION HELPERS ---
+    /**
+     * @brief Procedurally generates a new chunk of terrain.
+     * @param chunkX The chunk index to generate.
+     */
     void generateChunk(int chunkX);
+
+    /**
+     * @brief Loads all textures for blocks, items, tools, and armor.
+     */
+    void loadTextures();
 
     // --- DATA ---
     float mTileSize;
 
-    // THE CHUNK MAP
+    // THE CHUNK MAPS
     // Key: Chunk Coordinate (X)
-    // Value: A vector of integers representing the blocks in that chunk
+    // Value: 1D Array representing the 2D grid of blocks in that chunk (Width * Height)
     std::map<int, std::vector<int>> mChunks;
+    std::map<int, std::vector<int>> mBackgroundChunks; // Back wall layers
 
-    std::map<int, std::vector<int>> mBackgroundChunks;
+    // Graphics Resources
+    std::map<int, sf::Texture> mTextures;          // Icons and block textures
+    std::map<int, sf::Texture> mHeldTextures;      // Hand-held weapon/tool textures
+    std::map<int, sf::Texture> mArmorAnimTextures; // Animated spritesheets for armor pieces
 
-    // --- GRAPHICS RESOURCES ---
-    // A map to store textures by Block identification
-    // ID 1 -> Dirt Texture
-    // ID 2 -> Grass Texture
-    // ID 3 -> Stone Texture
-    std::map<int, sf::Texture> mTextures;
+    sf::Sprite mSprite; // Shared sprite instance for high-performance rendering
 
-    // A single reusable sprite for drawing all world tiles to improve performance
-    sf::Sprite mSprite;
-
-    // Helper method to load all necessary block textures
-    void loadTextures();
-
-    // --- ITEMS ---
+    // Dynamic Entities
     std::vector<ItemDrop> mItems;
-
-    // Dedicated textures for when the weapon is equipped in hand
-    std::map<int, sf::Texture> mHeldTextures;
 };

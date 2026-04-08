@@ -6,18 +6,28 @@
 #include "World.h"
 #include "Dodo.h"
 #include "Troodon.h"
-#include <memory> // NECESSARY FOR unique_ptr
+#include <memory> // Necessary for unique_ptr
 #include <vector>
 #include <utility>
 #include <fstream>
 #include "Projectile.h"
+#include "TRex.h"
 
+/**
+ * @enum GameState
+ * @brief Represents the current state of the game loop.
+ */
 enum class GameState {
     MainMenu,
+    IntroCinematic, // <--- NEW: Story intro phase
     Playing,
     Paused
 };
 
+/**
+ * @enum ItemID
+ * @brief Unique identifiers for blocks, items, tools, and weapons.
+ */
 enum ItemID {
     AIR = 0,
 
@@ -45,13 +55,13 @@ enum ItemID {
     IRON_PICKAXE = 23,
     TUNGSTEN_PICKAXE = 24,
 
-    // Weapons (NEW!)
+    // Weapons
     WOOD_SWORD = 31,
     STONE_SWORD = 32,
     IRON_SWORD = 33,
     TUNGSTEN_SWORD = 34,
-    BOW = 35,       // <--- NUEVO: Arco
-    ARROW = 36,     // <--- NUEVO: Flecha
+    BOW = 35,       // <--- NEW: Bow
+    ARROW = 36,     // <--- NEW: Arrow
 
     // Structures and Doors
     DOOR = 25,
@@ -72,9 +82,21 @@ enum ItemID {
     IRON_INGOT = 51,
     COPPER_INGOT = 52,
     COBALT_INGOT = 53,
-    TUNGSTEN_INGOT = 54
+    TUNGSTEN_INGOT = 54,
+
+    // --- NEW: ARMOR ---
+    WOOD_HELMET = 61,
+    WOOD_CHEST = 62,
+    WOOD_LEGS = 63,
+    WOOD_BOOTS = 64,
+
+    MEAT_MEDALLION = 70
 };
 
+/**
+ * @struct Particle
+ * @brief Simple structure for a visual particle effect.
+ */
 struct Particle {
     sf::Vector2f position;
     sf::Vector2f velocity;
@@ -84,103 +106,121 @@ struct Particle {
     float size;
 };
 
+/**
+ * @class Game
+ * @brief Core game manager class that handles the game loop, rendering, logic, and state.
+ */
 class Game {
 public:
-    // Constructor and destructor
     Game();
     virtual ~Game();
 
-    // Main method that runs the game loop
+    /**
+     * @brief Main method that runs the game loop.
+     */
     void run();
 
     // Sky background elements
     sf::Texture mSkyTexture;
     sf::Sprite mSkySprite;
 
-
 private:
     struct ItemInfo {
         std::string name;
         float weight;
-        int maxStack; // How many fit in a single slot (e.g., 99 blocks, 1 pickaxe)
+        int maxStack; // Maximum quantity per slot (e.g., 99 blocks, 1 pickaxe)
     };
 
-    // An inventory slot
+    /**
+     * @struct InventorySlot
+     * @brief Represents a single slot in the inventory.
+     */
     struct InventorySlot {
-        int id = 0;       // 0 means it's empty
+        int id = 0;       // 0 means empty
         int count = 0;    // Quantity of the item
     };
 
     // --- CRAFTING SYSTEM ---
     struct Recipe {
-        int resultId;       // The ID of the item we are going to craft (e.g., Iron Pickaxe)
-        int resultCount;    // How many it gives us (usually 1)
-        bool requiresTable; // Does it require the crafting table to be made? <--- NEW
+        int resultId;       // Target item ID to craft
+        int resultCount;    // Amount produced
+        bool requiresTable; // Requires Crafting Table nearby
 
-        // A list of ingredients. Each ingredient is a pair {ID, Quantity}
+        // List of ingredients required. Each pair is {ID, Quantity}
         std::vector<std::pair<int, int>> ingredients;
     };
 
-    // The complete list of all game recipes
+    // Complete list of available crafting recipes
     std::vector<Recipe> mRecipes;
 
     // Helper functions for crafting
     bool canCraft(const Recipe& recipe);
     void craftItem(const Recipe& recipe);
 
-    // Process window events and user input
+    // Event handling, logic update, and rendering phases
     void processEvents();
-    // Update game logic (physics, AI, etc.)
     void update(sf::Time dt);
-    // Render all graphics to the window
     void render();
 
-    // --- NEW: SAVE METHODS ---
+    // Save and load system
     void saveGame();
     void loadGame();
 
-    // Core game variables
+    // Core game components
     sf::RenderWindow mWindow;
     Player mPlayer;
     World mWorld;
-    // Variable to track the currently selected block for building
+
     int mSelectedBlock;
     int mActiveWheelSlot = 3; // 0=Usable, 1=Block, 2=Weapon 2, 3=Weapon 1 (Default)
+
     // --- NEW INVENTORY SYSTEM ---
-    std::vector<InventorySlot> mBackpack; // The 30-slot backpack
+    std::vector<InventorySlot> mBackpack; // 30-slot main inventory
 
-
-    // The "Red Dead Redemption 2" system (Tactical Hotbar)
-    InventorySlot mEquippedPrimary;   // Primary Weapon/Tool (e.g., Iron Pickaxe)
-    InventorySlot mEquippedSecondary; // Secondary Weapon/Tool (e.g., Wood Pickaxe)
-    InventorySlot mEquippedConsumable;// Food (e.g., Meat)
+    // Tactical Hotbar (Quick slots)
+    InventorySlot mEquippedPrimary;   // Primary Weapon/Tool
+    InventorySlot mEquippedSecondary; // Secondary Weapon/Tool
+    InventorySlot mEquippedConsumable;// Food
     InventorySlot mEquippedBlock;     // Active building block
+
+    // --- NEW: DEFENSE WHEEL (4 Slots) ---
+    InventorySlot mArmorHead;
+    InventorySlot mArmorChest;
+    InventorySlot mArmorLegs;
+    InventorySlot mArmorBoots;
+
+    // Toggle switch: true = Defense Wheel (Blue), false = Attack/Tactical Wheel (Red/Normal)
+    bool mIsArmorWheelActive = false;
 
     // State variables
     bool mIsInventoryOpen = false;
     float mCurrentWeight = 0.0f;
-    const float mMaxWeight = 100.0f; // If you exceed 100, you move slowly
+    const float mMaxWeight = 100.0f; // Weight limit; exceeding it slows the player
 
-    // Dictionary to know the properties of each ID
+    // Database mapping item IDs to their properties
     std::map<int, ItemInfo> mItemDatabase;
 
-    // Helper functions we will have to program
-    // New inventory functions
+    // Inventory management helpers
     bool addItemToBackpack(int id, int amount);
     void calculateTotalWeight();
-    int getItemCount(int id);                  // Know how much we have of something
-    bool consumeItem(int id, int amount = 1);  // Spend an item (returns true if possible)
+    int getItemCount(int id);
+    bool consumeItem(int id, int amount = 1);
 
     float mGameTime;
     sf::Color mAmbientLight;
-    // --- TEXT AND FONTS (NEW) ---
+
+    // --- NEW: SMOOTH CAMERA ---
+    sf::Vector2f mCameraPos;
+
+    // UI and Fonts
     sf::Font mFont;
-    sf::Text mUiText; // We will use this object to draw all numbers
+    sf::Text mUiText; // Reusable text object for rendering numbers/labels
 
     // --- MINING SYSTEM ---
-    sf::Vector2i mMiningPos;   // Coordinates (X, Y) of the block we are mining
-    float mMiningTimer;        // How long we have been pressing
-    float mCurrentHardness;    // How much time that block needs to break
+    sf::Vector2i mMiningPos;   // Grid coordinates of the target block
+    float mMiningTimer;        // Time spent holding the action
+    float mCurrentHardness;    // Target block's required mining time
+
     sf::SoundBuffer mBufHit;
     sf::SoundBuffer mBufBreak;
     sf::SoundBuffer mBufBuild;
@@ -189,37 +229,35 @@ private:
     sf::Sound mSndBreak;
     sf::Sound mSndBuild;
 
-    float mActionTimer = 0.0f; // Timer for eating/building
+    float mActionTimer = 0.0f; // Cooldown timer for eating/building actions
 
     sf::Texture mDodoTexture;
     sf::Texture mTroodonTexture;
+    sf::Texture mTRexTexture;
 
-    // --- THE MASTER LIST OF ENTITIES ---
+    // Dynamic list of active entities (enemies/animals)
     std::vector<std::unique_ptr<Mob>> mMobs;
 
-    // --- PROYECTILES ---
+    // Active projectiles
     std::vector<std::unique_ptr<Projectile>> mProjectiles;
 
     // --- INTERACTION AND MENU SYSTEM ---
     bool mIsCraftingTableOpen = false;
     bool mIsFurnaceOpen = false;
 
-    // Function to be called upon Right Clicking in the world
-    bool interactWithBlock(int gridX, int gridY); // <-- Now is a bool
+    // Triggered on right-clicking a block
+    bool interactWithBlock(int gridX, int gridY);
 
-    // Wheel Texture and Sprite
+    // Quick selection wheel UI
     sf::Texture mWheelTexture;
     sf::Sprite mWheelSprite;
 
     // --- DRAG & DROP SYSTEM ---
-    InventorySlot mDraggedItem; // The item we are "floating" with the mouse
-    int mDragSourceType = 0;    // 0 = None, 1 = Came from Backpack, 2 = Came from Wheel
-    int mDragSourceIndex = -1;  // Exact slot it was in before picking it up
+    InventorySlot mDraggedItem;
 
     // --- SPAWNER SYSTEM ---
     float mSpawnTimer;
-    // Constant to not fill the world with monsters and lag the game
-    const size_t MAX_MOBS = 10;
+    const size_t MAX_MOBS = 10; // Population limit
 
     // --- HEALTH HUD (HEARTS) ---
     sf::Texture mHeartFullTex;
@@ -227,12 +265,12 @@ private:
     sf::Sprite mHeartSprite;
 
     // --- DEATH SYSTEM ---
-    bool mIsPlayerDead;          // Is the player currently dead?
-    float mRespawnTimer;         // Countdown (5, 4, 3...)
+    bool mIsPlayerDead;
+    float mRespawnTimer;         // Countdown timer before respawn
 
-    sf::Text mDeathTitleText;    // Giant text "YOU DIED"
-    sf::Text mDeathSubText;      // Small text "Respawning in..."
-    sf::RectangleShape mDeathOverlay; // Semi-transparent red/black background
+    sf::Text mDeathTitleText;
+    sf::Text mDeathSubText;
+    sf::RectangleShape mDeathOverlay;
 
     // --- FURNACE SYSTEM ---
     sf::Texture mFurnaceBgTex;
@@ -242,7 +280,7 @@ private:
     sf::Texture mFurnaceArrowTex;
     sf::Sprite mFurnaceArrowSprite;
 
-    // --- BLOCK ENTITY SYSTEM (FURNACES) ---
+    // State data for a single furnace
     struct FurnaceData {
         InventorySlot input;
         InventorySlot fuel;
@@ -252,39 +290,32 @@ private:
         float smeltTimer = 0.0f;
     };
 
-    // A map that saves furnace data using its (X, Y) coordinates
+    // Dictionary of all active furnaces by coordinate
     std::map<std::pair<int, int>, FurnaceData> mActiveFurnaces;
 
-    // To know which furnace is open on screen
+    // Coordinates of the currently open furnace UI
     std::pair<int, int> mOpenFurnacePos;
 
-    // Logic timers
-    const float SMELT_TIME = 3.0f;     // Takes 3 seconds to smelt 1 ingot
+    const float SMELT_TIME = 3.0f;     // Seconds required to smelt 1 item
 
     // --- CHEST SYSTEM ---
     struct ChestData {
-        // A chest will have 24 slots (6 columns x 4 rows)
         std::vector<InventorySlot> slots;
-
-        // Constructor to initialize it empty
         ChestData() {
-            slots.resize(24);
+            slots.resize(24); // 6 columns x 4 rows
         }
     };
 
-    // Map to save all chests in the world
     std::map<std::pair<int, int>, ChestData> mActiveChests;
 
-    // Interface state variables
     bool mIsChestOpen = false;
     std::pair<int, int> mOpenChestPos;
 
-    // Helper function to reset the player
     void respawnPlayer();
 
     // --- DAY AND NIGHT CYCLE ---
     void updateDayNightCycle(float dtAsSeconds);
-    const float DAY_LENGTH = 120.0f; // A day lasts 2 minutes for quick testing! (We will increase it later)
+    const float DAY_LENGTH = 120.0f; // Total day length in seconds
 
     void renderHUD();
     void renderMenus();
@@ -298,13 +329,24 @@ private:
 
     GameState mGameState = GameState::MainMenu;
 
-    // Menu texts
+    // Main Menu Texts
     sf::Text mMenuTitleText;
     sf::Text mMenuPlayText;
     sf::Text mMenuExitText;
     sf::Text mPauseTitleText;
 
-    // Render functions to avoid cluttering the main code
-    void renderMainMenu();
-    void renderPauseMenu();
-    };
+    // --- NEW: CINEMATIC SYSTEM ---
+    float mCinematicTimer = 0.0f;
+    int mCinematicPhase = 0; // 0 = Text 1, 1 = Text 2, 2 = Falling, 3 = Impact
+
+    sf::Text mCinematicTextYear;
+    sf::Text mCinematicTextPlanet;
+
+    sf::Texture mCapsuleTexture;
+    sf::Sprite mCapsuleSprite;
+    sf::Vector2f mCapsulePos;
+    sf::Vector2f mCapsuleVelocity;
+
+    int mTotalDays = 1;
+    float mShakeTimer = 0.0f;
+};

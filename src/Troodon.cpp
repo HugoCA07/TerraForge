@@ -1,165 +1,201 @@
 #include "Troodon.h"
 #include <cmath>
 
-// The Troodon has 40 health points
+/**
+ * @brief Constructor for the Troodon.
+ * Initializes stats, origin, and starting animation.
+ * @param startPos The initial spawning position.
+ * @param texture The sprite texture to use.
+ */
 Troodon::Troodon(sf::Vector2f startPos, const sf::Texture& texture)
-    : Mob(startPos, texture, 40)
+    : Mob(startPos, texture, 50) // 50 HP (Stronger than the Dodo)
+    , mCurrentAnim(TroodonAnim::Idle)
+    , mAnimTimer(0.0f)
+    , mCurrentFrame(0)
+    , mIsAttacking(false)
+    , mAttackCooldown(0.0f)
+    , mAttackDuration(0.0f)
 {
-    mAttackDamage = 40; // <--- ADD THIS!
+    mAttackDamage = 45;
+    mSprite.setOrigin(32.0f, 48.0f); // Center-bottom origin (Frame size: 64x48)
+    mSprite.setTextureRect(sf::IntRect(0, 0, 64, 48));
 }
 
 /**
- * Updates the Troodon's state.
- * Handles AI behavior (hunting at night, fleeing during the day), movement, gravity, and collisions.
- * @param dt Delta time (time elapsed since last frame).
- * @param playerPos The player's current position.
+ * @brief Updates the Troodon's logic, AI, physics, and animation.
+ * @param dt Time elapsed since the last frame.
+ * @param playerPos The player's current position to track and attack.
  * @param world Reference to the game world for collision detection.
- * @param lightLevel The current light level (affects behavior).
+ * @param lightLevel The current ambient light level for coloring.
  */
 void Troodon::update(sf::Time dt, sf::Vector2f playerPos, World& world, float lightLevel) {
+    float dtSec = dt.asSeconds();
+    if (mDamageTimer > 0.0f) mDamageTimer -= dtSec;
+    if (mAttackCooldown > 0.0f) mAttackCooldown -= dtSec;
 
-    float tileSize = world.getTileSize();
+    TroodonAnim nextAnim = TroodonAnim::Idle;
+    float distX = playerPos.x - mPos.x;
+    float distY = playerPos.y - mPos.y;
 
-    // 1. Damage timer
-    // 1. Damage timer (Aturdimiento)
+    // ==========================================
+    // 1. HUNTER AI BRAIN
+    // ==========================================
     if (mDamageTimer > 0.0f) {
-        mDamageTimer -= dt.asSeconds();
+        nextAnim = TroodonAnim::Idle; // Stunned while taking damage
+    }
+    else if (mIsAttacking) {
+        mAttackDuration -= dtSec;
+        nextAnim = TroodonAnim::Attack;
+        mVel.x = mFacingRight ? 280.0f : -280.0f; // Super fast dash attack!
 
-        // Mientras están aturdidos (volando hacia atrás), aplicamos fricción
-        // para que no resbalen por el suelo infinitamente como si fuera hielo.
-        mVel.x *= 0.95f;
+        if (mAttackDuration <= 0.0f) {
+            mIsAttacking = false;
+            mAttackCooldown = 1.5f; // Fast attack recovery
+        }
     }
     else {
-        // -----------------------------------------------------
-        // 1. AI (TROODON BRAIN) - SENSORS AND PARKOUR
-        // -----------------------------------------------------
-        float distX = playerPos.x - mPos.x;
-        float distY = playerPos.y - mPos.y;
-        float distTotal = std::sqrt(distX*distX + distY*distY);
-
-        // --- EL MOVIMIENTO AHORA ES CONSTANTE (Tierra y Aire) ---
-        // IT'S NIGHT (Low light) -> Relentless hunt!
-        if (lightLevel < 0.6f && distTotal < 600.0f) {
-            if (distX > 0) {
-                mVel.x = 180.0f; // Runs towards you
-                mFacingRight = true;
-            } else {
-                mVel.x = -180.0f;
-                mFacingRight = false;
-            }
+        // Attack range check
+        if (std::abs(distX) < 70.0f && std::abs(distY) < 50.0f && mAttackCooldown <= 0.0f) {
+            mIsAttacking = true;
+            mAttackDuration = 0.4f; // Quick lethal bite
+            mFacingRight = (distX > 0);
+            if (mVel.y == 0.0f) mVel.y = -250.0f; // Leap at the jugular
         }
-        // IT'S DAY (High light) -> Runs away terrified if you get close!
-        else if (lightLevel >= 0.6f && distTotal < 400.0f) {
-            if (distX > 0) {
-                mVel.x = -150.0f; // Runs in the opposite direction
-                mFacingRight = false;
-            } else {
-                mVel.x = 150.0f;
-                mFacingRight = true;
-            }
+        // Chase range check (Huge sight radius)
+        else if (std::abs(distX) < 800.0f) {
+            mVel.x = (distX > 0) ? 140.0f : -140.0f; // Runs quite fast
+            mFacingRight = (distX > 0);
+            nextAnim = TroodonAnim::Walk;
         }
-        // If you are far away or nothing happens, it stays still
+        // Idle (Stays still stalking if you are far away)
         else {
-            mVel.x *= 0.8f;
-        }
-
-        // --- LOS SENSORES DE SALTO SOLO FUNCIONAN EN EL SUELO ---
-        if (mVel.y == 0.0f && std::abs(mVel.x) > 10.0f) {
-            int dirX = mFacingRight ? 1 : -1;
-
-            sf::FloatRect bounds = mSprite.getGlobalBounds();
-
-            float centerX = bounds.left + (bounds.width / 2.0f);
-            float bottomY = bounds.top + bounds.height;
-
-            int nextGridX = static_cast<int>(std::floor((centerX + (dirX * tileSize)) / tileSize));
-            int footGridY = static_cast<int>(std::floor((bottomY - 5.0f) / tileSize));
-            int pitGridY  = static_cast<int>(std::floor((bottomY + 5.0f) / tileSize));
-
-            bool wallAhead = world.isSolid(world.getBlock(nextGridX, footGridY));
-
-            // --- ¡EL FIX! Escáner de profundidad ---
-            // Un barranco real requiere al menos 3 bloques seguidos de caída libre
-            bool pitAhead = !world.isSolid(world.getBlock(nextGridX, pitGridY)) &&
-                            !world.isSolid(world.getBlock(nextGridX, pitGridY + 1)) &&
-                            !world.isSolid(world.getBlock(nextGridX, pitGridY + 2));
-
-            if (pitAhead || wallAhead) {
-                // Salto de Parkour para superar muros o cruzar barrancos reales
-                mVel.y = -350.0f;
-            }
+            mVel.x = 0.0f;
         }
     }
 
-    // -----------------------------------------------------
-    // 2. HORIZONTAL MOVEMENT AND COLLISIONS
-    // -----------------------------------------------------
-    float dx = mVel.x * dt.asSeconds();
-    mPos.x += dx;
-    mSprite.setPosition(mPos);
+    if (mVel.y != 0.0f && !mIsAttacking) nextAnim = TroodonAnim::Jump;
 
-    auto checkCollision = [&](sf::FloatRect rect) -> bool {
-        int left = static_cast<int>(std::floor(rect.left / tileSize));
-        int right = static_cast<int>(std::floor((rect.left + rect.width) / tileSize));
-        int top = static_cast<int>(std::floor(rect.top / tileSize));
-        int bottom = static_cast<int>(std::floor((rect.top + rect.height) / tileSize));
-
+    // ==========================================
+    // 2. PRO PHYSICS AND ANTICIPATION SENSOR
+    // ==========================================
+    auto checkCollision = [&](sf::FloatRect rect) {
+        int left = static_cast<int>(std::floor(rect.left / world.getTileSize()));
+        int right = static_cast<int>(std::floor((rect.left + rect.width) / world.getTileSize()));
+        int top = static_cast<int>(std::floor(rect.top / world.getTileSize()));
+        int bottom = static_cast<int>(std::floor((rect.top + rect.height) / world.getTileSize()));
         for (int x = left; x <= right; ++x) {
             for (int y = top; y <= bottom; ++y) {
-                if (world.isSolid(world.getBlock(x, y))) return true;
+                if (World::isSolid(world.getBlock(x, y))) return true;
             }
         }
         return false;
     };
 
-    sf::FloatRect bounds = mSprite.getGlobalBounds();
-    bounds.left += 2.0f; bounds.width -= 4.0f; bounds.top += 2.0f; bounds.height -= 4.0f;
+    // --- REAL GROUND DETECTOR ---
+    sf::FloatRect groundSensor = getBounds();
+    groundSensor.top += groundSensor.height;
+    groundSensor.height = 2.0f;
+    bool isGrounded = (mVel.y >= 0.0f && checkCollision(groundSensor));
 
-    // --- CORRECCIÓN HORIZONTAL ---
-    if (checkCollision(bounds)) {
-        mPos.x -= dx;
-        mSprite.setPosition(mPos);
-        mVel.x = 0.0f;
+    float dx = mVel.x * dtSec;
+    mPos.x += dx;
+    mSprite.setPosition(mPos);
+
+    sf::FloatRect boundsX = getBounds();
+    boundsX.height -= 15.0f; // Cut the ankles for easier stepping
+
+    // --- VISUAL ANTICIPATION SENSOR (Jump over obstacles) ---
+    if (isGrounded && std::abs(mVel.x) > 0.0f) {
+        sf::FloatRect sensor = boundsX;
+        sensor.left += (mVel.x > 0) ? 25.0f : -25.0f; // Look ahead
+
+        if (checkCollision(sensor)) {
+            mVel.y = -380.0f;
+            isGrounded = false; // Take off!
+        }
     }
 
-    // -----------------------------------------------------
-    // 3. GRAVITY AND VERTICAL MOVEMENT
-    // -----------------------------------------------------
-    mVel.y += 900.0f * dt.asSeconds();
-    float dy = mVel.y * dt.asSeconds();
+    // Real physical collision X
+    if (checkCollision(boundsX)) {
+        mPos.x -= dx;
+        if (isGrounded) {
+            mVel.y = -380.0f;
+            isGrounded = false;
+        }
+        mSprite.setPosition(mPos);
+    }
+
+    // Gravity Y
+    mVel.y += 1000.0f * dtSec;
+    if (mVel.y > 800.0f) mVel.y = 800.0f; // Terminal velocity
+    float dy = mVel.y * dtSec;
     mPos.y += dy;
     mSprite.setPosition(mPos);
 
-    bounds = mSprite.getGlobalBounds();
-    bounds.left += 2.0f; bounds.width -= 4.0f;
-
-    // --- CORRECCIÓN VERTICAL ---
-    if (checkCollision(bounds)) {
-        if (mVel.y > 0.0f) { // Cayendo
-            int blockY = static_cast<int>(std::floor((bounds.top + bounds.height) / tileSize));
-            float newY = blockY * tileSize - bounds.height;
-
-            if (std::abs(mPos.y - newY) < tileSize) {
-                mPos.y = newY;
-            } else {
-                mPos.y -= dy;
-            }
+    sf::FloatRect boundsY = getBounds();
+    // Real physical collision Y
+    if (checkCollision(boundsY)) {
+        if (mVel.y > 0.0f) { // Hitting ground
+            int blockY = static_cast<int>(std::floor((boundsY.top + boundsY.height) / world.getTileSize()));
+            float newY = blockY * world.getTileSize();
+            if (std::abs(mPos.y - newY) < world.getTileSize() * 2.0f) mPos.y = newY;
+            else mPos.y -= dy;
             mVel.y = 0.0f;
-        } else if (mVel.y < 0.0f) { // Techo
+            isGrounded = true; // Lands
+        } else if (mVel.y < 0.0f) { // Hitting ceiling
             mPos.y -= dy;
             mVel.y = 0.0f;
         }
         mSprite.setPosition(mPos);
     }
 
-    // -----------------------------------------------------
-    // 4. UPDATE VISUALS
-    // -----------------------------------------------------
-    mSprite.setPosition(mPos);
+    // ==========================================
+    // 3. ANIMATION ENGINE
+    // ==========================================
+    // Force jump animation while mid-air
+    if (!isGrounded && !mIsAttacking) nextAnim = TroodonAnim::Jump;
 
-    // Corregimos el sprite centrándolo para que al girar no tiemble
-    mSprite.setOrigin(mSprite.getLocalBounds().width / 2.0f, 0.0f);
+    if (nextAnim != mCurrentAnim) {
+        mCurrentAnim = nextAnim;
+        mCurrentFrame = 0;
+        mAnimTimer = 0.0f;
+    }
 
-    if (mFacingRight) mSprite.setScale(1.0f, 1.0f);
-    else mSprite.setScale(-1.0f, 1.0f);
+    mAnimTimer += dtSec;
+    if (mAnimTimer >= 0.12f) { // Fast animation speed
+        mAnimTimer = 0.0f;
+        mCurrentFrame = (mCurrentFrame + 1) % 4;
+    }
+
+    mSprite.setTextureRect(sf::IntRect(mCurrentFrame * 64, static_cast<int>(mCurrentAnim) * 48, 64, 48));
+
+    // Visuals and damage tint
+    float currentScale = std::abs(mSprite.getScale().y);
+    mSprite.setScale(mFacingRight ? currentScale : -currentScale, currentScale);
+    if (mDamageTimer > 0.0f) {
+        mSprite.setColor(sf::Color::Red);
+    } else {
+        // Base color affected by world lighting, but a bit brighter so it's not invisible at night
+        mSprite.setColor(sf::Color(
+            std::min(255, (int)(255 * lightLevel) + 20),
+            std::min(255, (int)(255 * lightLevel) + 20),
+            std::min(255, (int)(255 * lightLevel) + 20)
+        ));
+    }
+}
+
+// ==========================================
+// CUSTOM HITBOX
+// ==========================================
+/**
+ * @brief Generates a custom bounding box for physics and combat.
+ * The visual sprite has a lot of empty space, so the hitbox is tightened.
+ */
+sf::FloatRect Troodon::getBounds() const {
+    sf::FloatRect bounds = mSprite.getGlobalBounds();
+    bounds.left += (bounds.width - 24.0f) / 2.0f;
+    bounds.width = 24.0f;
+    bounds.top += 10.0f;
+    bounds.height -= 10.0f;
+    return bounds;
 }

@@ -1,57 +1,57 @@
 #include "World.h"
 #include <iostream>
 #include <cmath>
+#include <algorithm>
 
 /**
- * Constructor for the World class.
- * Initializes the tile size and loads block textures.
+ * @brief Constructor for the World class.
+ * Initializes the tile size and triggers the loading of all block and item textures.
  */
 World::World()
     : mTileSize(32.0f)
 {
-    // Load all block textures when the world is created.
     loadTextures();
 }
 
-// --- SMART GET BLOCK (INFINITE GENERATION) ---
+// ==========================================
+// DYNAMIC CHUNK GENERATION
+// ==========================================
+
 /**
- * Retrieves the block ID at the specified global coordinates.
- * Generates the chunk if it doesn't exist.
+ * @brief Retrieves the block ID at the specified global grid coordinates.
+ * If the requested chunk is not currently in memory, it is generated on the fly.
  * @param x Global X coordinate (in blocks).
  * @param y Global Y coordinate (in blocks).
- * @return The block ID, or 0 (Air) if out of bounds.
+ * @return The ItemID of the block, or 0 (Air) if out of vertical bounds.
  */
-
 int World::getBlock(int x, int y) {
-    // 1. Boundary Check (Vertical is fixed)
+    // Boundary Check: Ensure Y is within the world height limits
     if (y < 0 || y >= WORLD_HEIGHT) {
         return 0; // Air outside vertical limits
     }
 
-    // 2. Calculate Chunk Coordinate
-    // Example: If x=20 and CHUNK_WIDTH=16, we are in Chunk 1.
-    // We use std::floor() to handle negative coordinates correctly (e.g., x=-5 is in chunk -1).
+    // Calculate Chunk Index
+    // std::floor ensures negative coordinates are grouped correctly (e.g., x=-5 belongs to chunk -1)
     int chunkIndex = static_cast<int>(std::floor(x / (float)CHUNK_WIDTH));
 
-    // 3. Check if Chunk exists in memory
+    // Check memory: generate the chunk if it doesn't exist yet
     if (mChunks.find(chunkIndex) == mChunks.end()) {
-        // If the chunk doesn't exist in our map, generate it on the fly.
         generateChunk(chunkIndex);
     }
 
-    // 4. Retrieve Block from Chunk
-    // We need to find the local X coordinate within that chunk (0 to CHUNK_WIDTH-1).
-    // The modulo operator handles negative coordinates correctly to wrap them into the 0-15 range.
+    // Retrieve the specific block from the chunk's 1D vector array.
+    // The modulo operator wraps negative local coordinates into the 0-15 range safely.
     int localX = (x % CHUNK_WIDTH + CHUNK_WIDTH) % CHUNK_WIDTH;
-    int index = y * CHUNK_WIDTH + localX; // Convert 2D chunk coordinates to 1D vector index.
+    int index = y * CHUNK_WIDTH + localX;
 
     return mChunks[chunkIndex][index];
 }
 
 /**
- * Generates a new chunk at the specified chunk X coordinate.
- * Creates terrain, caves, ores, and trees using procedural generation.
- * @param chunkX The X coordinate of the chunk to generate.
+ * @brief Procedurally generates a new chunk of terrain.
+ * Uses a combination of Perlin-style noise and cellular automata to carve out biomes,
+ * caves, ore veins, and surface decorations (trees).
+ * @param chunkX The chunk coordinate (X index) to generate.
  */
 void World::generateChunk(int chunkX) {
     std::vector<int> newChunk;
@@ -61,7 +61,7 @@ void World::generateChunk(int chunkX) {
     newChunk.resize(totalBlocks, 0);
     newBgChunk.resize(totalBlocks, 0);
 
-    float seed = 97.0f;
+    float seed = 97.0f; // Static seed for testing, make variable for random worlds
     int surfaceHeights[CHUNK_WIDTH];
 
     // ---------------------------------------------------------
@@ -70,70 +70,65 @@ void World::generateChunk(int chunkX) {
     for (int localX = 0; localX < CHUNK_WIDTH; ++localX) {
         int globalX = (chunkX * CHUNK_WIDTH) + localX;
 
-        // 1. CALCULAR LA ALTURA DE LA SUPERFICIE (Igual que antes)
+        // 1. CALCULATE SURFACE ELEVATION (Rolling hills)
         float n1 = std::sin((globalX + seed) / 50.0f);
         float n2 = std::sin((globalX + seed) / 25.0f) * 0.5f;
         float baseHeight = 80.0f;
         int surfaceY = static_cast<int>(baseHeight + ((n1 + n2) * 15.0f));
         surfaceHeights[localX] = surfaceY;
 
-        // 2. CALCULAR LA "HUMEDAD" (El Bioma)
-        // Al restar 100, forzamos a que en la coordenada de Spawn (X=100), el valor del seno sea exactamente 0 (Bioma Normal).
-        // Al dividir por 500.0f (en lugar de 300), hacemos los biomas mucho más anchos y épicos.
+        // 2. CALCULATE BIOME "MOISTURE" (Temperature zones)
         float biomeValue = std::sin((globalX - 100) / 500.0f);
 
-        bool isDesert = (biomeValue > 0.5f);  // Desierto
-        bool isSnow = (biomeValue < -0.5f);   // Nieve
-        // Si está entre -0.5 y 0.5, es el bioma normal (Pradera/Bosque)
+        bool isDesert = (biomeValue > 0.5f);
+        bool isSnow = (biomeValue < -0.5f);
 
+        // Calculate specific depth and shape properties for special biomes
+        float biomeDepth = 0.0f;
+
+        if (isDesert) {
+            // Intensity from 0.0 (edge) to 1.0 (center)
+            float intensity = (biomeValue - 0.5f) * 2.0f;
+            // "Bag" shape: Wide and deep, drops sharply (exponent 0.5)
+            biomeDepth = 45.0f * std::pow(intensity, 0.5f);
+        }
+        else if (isSnow) {
+            float intensity = (std::abs(biomeValue) - 0.5f) * 2.0f;
+            // "V" / "Diamond" shape: Drops down in a straight, pointy angle (exponent 1.2)
+            biomeDepth = 45.0f * std::pow(intensity, 1.2f);
+        }
+
+        // Fill the vertical column for this X coordinate
         for (int y = 0; y < WORLD_HEIGHT; ++y) {
             int index = y * CHUNK_WIDTH + localX;
             int blockID = 0;
             int bgID = 0;
 
-            // Background Walls
+            // Background Walls (Generated based on depth)
             if (y > surfaceY) {
-                if (y < surfaceY + 10) bgID = 1; // Dirt wall
-                else bgID = 3;                   // Stone wall
+                if (y < surfaceY + 10) bgID = 1; // Dirt wall layer
+                else bgID = 3;                   // Deep Stone wall layer
             }
 
-            // Foreground Blocks
+            // Foreground Solid Blocks
             if (y >= WORLD_HEIGHT - 2) {
-                blockID = 12; // Bedrock
+                blockID = 12; // Unbreakable Bedrock bottom layer
             }
             else if (y >= surfaceY) {
+                int depthFromSurface = y - surfaceY;
 
-                // --- CAPA INFERIOR: PIEDRA Y BOLSAS DE ARENA ---
-                if (y >= surfaceY + 5) {
-                    blockID = 3; // Por defecto es Piedra
-
-                    // Si estamos en un Desierto, generamos las "Bolsas Amarillas"
-                    if (isDesert) {
-                        // Combinamos dos ondas para hacer bolsas cerradas
-                        float pocketX = std::sin((globalX + seed) / 10.0f);
-                        float pocketY = std::cos((y + seed) / 10.0f);
-                        float pocketValue = pocketX * pocketY;
-
-                        // Si el valor matemático es alto (ej. > 0.4), ponemos Arena en vez de Piedra.
-                        // Además, limitamos la profundidad (y < surfaceY + 40) para que la bolsa no llegue al inframundo.
-                        if (pocketValue > 0.4f && y < surfaceY + 40) {
-                            blockID = 13; // ID 13 = Arena
-                        }
-                    }
+                // Apply biome overlays overrides based on the calculated depth curve
+                if (isDesert && depthFromSurface <= biomeDepth) {
+                    blockID = 13; // Sand block filling the desert pocket
                 }
-                // --- CAPA SUPERIOR: SUPERFICIE (Hierba, Arena o Nieve) ---
+                else if (isSnow && depthFromSurface <= biomeDepth) {
+                    blockID = 14; // Snow block filling the tundra pocket
+                }
                 else {
-                    if (isDesert) {
-                        blockID = 13; // En el desierto, la superficie es 100% Arena
-                    }
-                    else if (isSnow) {
-                        blockID = 14; // En el bioma frío, la superficie es 100% Nieve
-                    }
-                    else {
-                        // Bioma Normal
-                        if (y == surfaceY) blockID = 2;       // Hierba
-                        else blockID = 1;                     // Tierra
-                    }
+                    // Standard geology generation (Grass -> Dirt -> Stone)
+                    if (depthFromSurface == 0) blockID = 2;       // Grass layer
+                    else if (depthFromSurface < 5) blockID = 1;   // Dirt layer
+                    else blockID = 3;                             // Deep Stone layer
                 }
             }
 
@@ -143,56 +138,58 @@ void World::generateChunk(int chunkX) {
     }
 
     // ---------------------------------------------------------
-    // STEP 1.5: CAVES (Gusanos Explorables + Huecos Aislados)
+    // STEP 1.5: CAVE SYSTEMS (Worm tunnels + Isolated pockets)
     // ---------------------------------------------------------
-    // 1. Añadimos ruido mixto: Túneles matemáticos y huecos aleatorios
+    // 1. Carve raw noise
     for (int localX = 0; localX < CHUNK_WIDTH; ++localX) {
         int globalX = (chunkX * CHUNK_WIDTH) + localX;
         int surfaceY = surfaceHeights[localX];
 
-        // Empezamos 10 bloques por debajo de la superficie
+        // Start carving 10 blocks beneath the surface to prevent floating islands
         for (int y = surfaceY + 10; y < WORLD_HEIGHT - 5; ++y) {
             int index = y * CHUNK_WIDTH + localX;
 
-            // Solo rompemos la piedra
+            // Only carve through stone
             if (newChunk[index] == 3) {
-
-                // A) CUEVAS EXPLORABLES (Spaghetti Caves)
-                // Combinamos 3 ondas diferentes para crear patrones caóticos pero conectados
+                // A) SPAGHETTI CAVES (Interconnected tunnels)
+                // Combine 3 different sine waves for a chaotic but connected pattern
                 float n1 = std::sin((globalX + seed) / 20.0f);
                 float n2 = std::cos((y + seed) / 15.0f);
                 float n3 = std::sin((globalX - y) / 35.0f);
                 float caveNoise = n1 + n2 + n3;
 
-                // Si las ondas se cancelan y dan un valor cercano a 0, creamos un túnel.
-                // El 0.4f determina la "anchura" de estos súper túneles.
+                // Create a tunnel if the wave values cancel out close to zero
                 bool isWormCave = std::abs(caveNoise) < 0.4f;
 
-                // B) HUECOS AISLADOS (Tu sistema original)
-                // Reducimos un poco la probabilidad (ej: de 45 a 40) porque los túneles ya vacían terreno
+                // B) POCKET CAVES (Isolated spherical rooms)
                 bool isPocketCave = (rand() % 100 < 40);
 
-                // Si es un túnel principal o un hueco aburrido, lo convertimos en aire
                 if (isWormCave || isPocketCave) {
-                    newChunk[index] = 0;
+                    newChunk[index] = 0; // Replace stone with air
                 }
             }
         }
     }
 
-    // 2. Suavizamos todo (Túneles y huecos) con el Autómata Celular
+    // 2. Cellular Automata Smoothing (Smooths out jagged edges and floating blocks)
     int smoothingPasses = 4;
     for (int p = 0; p < smoothingPasses; ++p) {
-        std::vector<int> tempChunk = newChunk; // Mapa temporal para leer el estado anterior
+        std::vector<int> tempChunk = newChunk; // Read from previous state buffer
 
         for (int localX = 0; localX < CHUNK_WIDTH; ++localX) {
             int surfaceY = surfaceHeights[localX];
 
             for (int y = surfaceY + 10; y < WORLD_HEIGHT - 5; ++y) {
                 int index = y * CHUNK_WIDTH + localX;
+
+                // BIOME SHIELD: Do not smooth Sand or Snow, so they don't turn into stone
+                if (tempChunk[index] == 13 || tempChunk[index] == 14) {
+                    continue;
+                }
+
                 int neighborWalls = 0;
 
-                // Contamos los muros vecinos
+                // Count solid neighbor blocks within a 3x3 grid
                 for (int nx = localX - 1; nx <= localX + 1; ++nx) {
                     for (int ny = y - 1; ny <= y + 1; ++ny) {
                         if (nx >= 0 && nx < CHUNK_WIDTH && ny >= 0 && ny < WORLD_HEIGHT) {
@@ -202,47 +199,43 @@ void World::generateChunk(int chunkX) {
                                 }
                             }
                         } else {
+                            // Assume edges outside chunk are solid to prevent infinite bleeding
                             neighborWalls++;
                         }
                     }
                 }
 
-                // Aplicamos las reglas de supervivencia para pulir los bordes
+                // Survival rules for smoothing
                 if (neighborWalls > 4) {
-                    newChunk[index] = 3; // Mantiene piedra
+                    newChunk[index] = 3; // Become/Stay solid stone
                 } else if (neighborWalls < 4) {
-                    newChunk[index] = 0; // Se convierte en Aire
+                    newChunk[index] = 0; // Become/Stay air
                 }
             }
         }
     }
 
     // ---------------------------------------------------------
-    // STEP 2: ORE GENERATOR (Veins)
+    // STEP 2: ORE VEIN GENERATION
     // ---------------------------------------------------------
-    // Lambda function to "stamp" a vein
-    auto spawnVein = [&](int count, int id, int minDepth, int maxDepth, int size) {
+    // Lambda function to "stamp" a circular vein blob into the chunk
+    auto spawnVein = [&](int count, int id, int minDepth, int maxDepth, int sizeProbability) {
         for (int i = 0; i < count; ++i) {
-            // 1. Choose a random center point within the chunk
+            // Choose a random center coordinate within the chunk depth bounds
             int cx = rand() % CHUNK_WIDTH;
             int cy = minDepth + (rand() % (maxDepth - minDepth));
 
-            // 2. Create a "blob" shape around the center
-            // We loop a small area around the center
+            // Populate a 3x3 area around the center point based on probability
             for (int vx = -1; vx <= 1; ++vx) {
                 for (int vy = -1; vy <= 1; ++vy) {
-                    // Probability to fill so it's not a perfect square
-                    if ((rand() % 100) > size) continue;
+                    if ((rand() % 100) > sizeProbability) continue;
 
                     int nx = cx + vx;
                     int ny = cy + vy;
 
-                    // Check bounds
                     if (nx >= 0 && nx < CHUNK_WIDTH && ny >= 0 && ny < WORLD_HEIGHT) {
                         int index = ny * CHUNK_WIDTH + nx;
-
-                        // ONLY replace STONE (ID 3).
-                        // We don't break dirt, air, or other minerals.
+                        // ONLY overwrite Stone (Do not destroy caves or dirt)
                         if (newChunk[index] == 3) {
                             newChunk[index] = id;
                         }
@@ -252,54 +245,43 @@ void World::generateChunk(int chunkX) {
         }
     };
 
-    // --- ORE CONFIGURATION ---
-    // (Number of attempts, ID, Min Depth, Max Depth, Fill Probability %)
-
-    // COAL (ID 7): Very common, large veins, near surface
-    spawnVein(6, 7, 20, 150, 80);
-
-    // COPPER (ID 8): Common, medium veins
-    spawnVein(4, 8, 30, 150, 70);
-
-    // IRON (ID 9): Less common, medium veins
-    spawnVein(3, 9, 50, 150, 70);
-
-    // COBALT (ID 10): Rare, deep, small veins
-    spawnVein(2, 10, 100, 150, 50);
-
-    // TUNGSTEN (ID 11): Very rare, very deep, very small veins
-    spawnVein(1, 11, 130, 150, 40);
-
+    // --- ORE CONFIGURATION (Attempts, ID, Min Depth, Max Depth, Spread % ) ---
+    spawnVein(6, 7, 20, 150, 80);  // COAL: Very common, large veins, shallow
+    spawnVein(4, 8, 30, 150, 70);  // COPPER: Common, medium veins
+    spawnVein(3, 9, 50, 150, 70);  // IRON: Less common, medium veins
+    spawnVein(2, 10, 100, 150, 50); // COBALT: Rare, deep, small veins
+    spawnVein(1, 11, 130, 150, 40); // TUNGSTEN: Very rare, very deep, tiny veins
 
     // ---------------------------------------------------------
-    // STEP 3: TREES
+    // STEP 3: SURFACE DECORATION (Trees)
     // ---------------------------------------------------------
     for (int localX = 0; localX < CHUNK_WIDTH; ++localX) {
         int globalX = (chunkX * CHUNK_WIDTH) + localX;
         int surfaceY = surfaceHeights[localX];
 
-        // --- ¡NUEVO! Solo plantamos árboles si el bloque de la superficie es HIERBA (ID 2) ---
         int surfaceBlockID = newChunk[surfaceY * CHUNK_WIDTH + localX];
 
+        // Trees only grow on GRASS (ID 2), with a random distribution, avoiding chunk edges
         if (surfaceBlockID == 2 && (std::abs(globalX * 437) % 100) < 10 && localX > 2 && localX < CHUNK_WIDTH - 3) {
             int treeHeight = 5 + (rand() % 11);
             int treeTopY = surfaceY - treeHeight;
 
-            // Leaves (Copa del árbol más frondosa)
+            // Generate Leaves (Canopy)
             for (int lx = -2; lx <= 2; ++lx) {
                 for (int ly = -2; ly <= 1; ++ly) {
-                    // Cortar las esquinas para hacer un círculo/óvalo en lugar de un cuadrado
+                    // Shave corners to create an oval/rounded shape instead of a square
                     if (std::abs(lx) == 2 && std::abs(ly) == 2) continue;
 
                     int leafY = treeTopY + ly;
                     int leafX = localX + lx;
                     if (leafY > 0 && leafY < WORLD_HEIGHT) {
                         int idx = leafY * CHUNK_WIDTH + leafX;
+                        // Don't overwrite existing blocks with leaves
                         if (newChunk[idx] == 0) newChunk[idx] = 5;
                     }
                 }
             }
-            // Trunk (Tronco)
+            // Generate Trunk (Wood)
             for (int i = 1; i <= treeHeight; ++i) {
                 int trunkY = surfaceY - i;
                 if (trunkY > 0) newChunk[trunkY * CHUNK_WIDTH + localX] = 4;
@@ -307,53 +289,53 @@ void World::generateChunk(int chunkX) {
         }
     }
 
+    // Save generated arrays into the chunk maps
     mChunks[chunkX] = newChunk;
     mBackgroundChunks[chunkX] = newBgChunk;
 }
 
+// ==========================================
+// RENDERING
+// ==========================================
+
 /**
- * Renders the visible part of the world.
- * Handles lighting, block rendering, background walls, and dropped items.
+ * @brief Renders the visible sections of the world (Culling).
+ * Processes dynamic lighting (torches + ambient depth) and draws
+ * background walls, foreground blocks, and dropped items.
  * @param window The render window.
- * @param ambientColor The current ambient light color.
+ * @param ambientColor The global daylight/nightlight color.
  */
 void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
     sf::View view = window.getView();
+
+    // Calculate visible area boundaries
     float left = view.getCenter().x - (view.getSize().x / 2.f);
     float right = view.getCenter().x + (view.getSize().x / 2.f);
     float top = view.getCenter().y - (view.getSize().y / 2.f);
     float bottom = view.getCenter().y + (view.getSize().y / 2.f);
 
+    // Calculate which chunks are visible on screen
     int startChunk = static_cast<int>(std::floor(left / (CHUNK_WIDTH * mTileSize))) - 1;
     int endChunk = static_cast<int>(std::floor(right / (CHUNK_WIDTH * mTileSize))) + 1;
 
-    // -----------------------------------------------------------
-    // [NEW] STEP 0: ENSURE WORLD EXISTS
-    // -----------------------------------------------------------
-    // Before calculating lights or drawing, check if chunks are missing.
-    // If missing, generate them RIGHT NOW.
+    // STEP 0: ENSURE VISIBLE CHUNKS EXIST
     for (int cx = startChunk; cx <= endChunk; ++cx) {
-        if (mChunks.find(cx) == mChunks.end()) {
-            generateChunk(cx);
-        }
+        if (mChunks.find(cx) == mChunks.end()) generateChunk(cx);
     }
 
-    // -----------------------------------------------------------
-    // STEP 1: FIND ALL VISIBLE LIGHTS
-    // -----------------------------------------------------------
+    // STEP 1: SCAN FOR LIGHT SOURCES (Torches)
     std::vector<sf::Vector2f> lightSources;
-
     for (int cx = startChunk; cx <= endChunk; ++cx) {
         auto it = mChunks.find(cx);
         if (it != mChunks.end()) {
-            const auto& blocks = it->second; // Use iterator (Safer)
+            const auto& blocks = it->second;
             for (int y = 0; y < WORLD_HEIGHT; ++y) {
                 float blockY = y * mTileSize;
+                // Minor vertical culling for light checks
                 if (blockY < top - 200 || blockY > bottom + 200) continue;
 
                 for (int lx = 0; lx < CHUNK_WIDTH; ++lx) {
-                    // ID 6 = Torch
-                    if (blocks[y * CHUNK_WIDTH + lx] == 6) {
+                    if (blocks[y * CHUNK_WIDTH + lx] == 6) { // ID 6 = Torch
                          float wx = (cx * CHUNK_WIDTH + lx) * mTileSize + mTileSize/2.f;
                          float wy = y * mTileSize + mTileSize/2.f;
                          lightSources.push_back(sf::Vector2f(wx, wy));
@@ -363,66 +345,49 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
         }
     }
 
-    // -----------------------------------------------------------
-    // SPRITE AND LIGHT PREPARATION
-    // -----------------------------------------------------------
     sf::Sprite sprite;
     float lightRadius = 250.0f;
 
-    // Lambda to calculate light
-    // Lambda para calcular la luz de cada bloque
+    // Dynamic Lighting Calculation Lambda
     auto calculateLight = [&](sf::Vector2f blockPos, sf::Color baseColor) -> sf::Color {
-
-        // 1. Empezamos con el color base (la oscuridad de la cueva o la luz del día)
         float r = baseColor.r;
         float g = baseColor.g;
         float b = baseColor.b;
 
-        // 2. Comprobamos las antorchas cercanas
-        // En Terraria la luz es RGB. Una antorcha emite (255, 200, 150) aprox.
-        float torchR = 0.0f;
-        float torchG = 0.0f;
-        float torchB = 0.0f;
+        float torchR = 0.0f, torchG = 0.0f, torchB = 0.0f;
 
         for (const auto& lightPos : lightSources) {
-            float dx = std::abs(blockPos.x - lightPos.x); // Distancia X
-            float dy = std::abs(blockPos.y - lightPos.y); // Distancia Y
+            float dx = std::abs(blockPos.x - lightPos.x);
+            float dy = std::abs(blockPos.y - lightPos.y);
 
-            // OPTIMIZACIÓN: Si está lejos, ni calculamos
+            // Optimization: Skip distance calc if strictly outside AABB bounds
             if (dx > lightRadius || dy > lightRadius) continue;
 
-            // FÓRMULA ESTILO TERRARIA: Distancia simple
             float dist = std::sqrt(dx*dx + dy*dy);
 
             if (dist < lightRadius) {
-                // Intensidad lineal (1.0 en el centro, 0.0 en el borde)
+                // Linear intensity falloff
                 float intensity = 1.0f - (dist / lightRadius);
 
-                // Acumulamos luz (Color Fuego: Mucho Rojo, Bastante Verde, Poco Azul)
-                // Usamos std::max para que las luces no se quemen (no sumen al infinito)
-                torchR = std::max(torchR, intensity * 255.0f);   // Rojo a tope
-                torchG = std::max(torchG, intensity * 200.0f);   // Verde alto (para hacer naranja/amarillo)
-                torchB = std::max(torchB, intensity * 120.0f);   // Azul bajo
+                // Additive torch light (Warm fire colors: Max Red, High Green, Low Blue)
+                torchR = std::max(torchR, intensity * 255.0f);
+                torchG = std::max(torchG, intensity * 200.0f);
+                torchB = std::max(torchB, intensity * 120.0f);
             }
         }
 
-        // 3. Mezclamos la luz ambiente con la luz de la antorcha (Screen blending simple)
-        // Nos quedamos con el valor más alto: o hay luz de sol, o hay luz de antorcha
+        // Screen blending: Choose the brightest value between ambient daylight and torchlight
         r = std::max(r, torchR);
         g = std::max(g, torchG);
         b = std::max(b, torchB);
 
-        // Clamping (que no pase de 255)
-        if (r > 255) r = 255;
-        if (g > 255) g = 255;
-        if (b > 255) b = 255;
-
-        return sf::Color(static_cast<sf::Uint8>(r), static_cast<sf::Uint8>(g), static_cast<sf::Uint8>(b));
+        // Clamp to prevent visual overflow
+        return sf::Color(static_cast<sf::Uint8>(std::min(r, 255.0f)),
+                         static_cast<sf::Uint8>(std::min(g, 255.0f)),
+                         static_cast<sf::Uint8>(std::min(b, 255.0f)));
     };
 
-    // -----------------------------------------------------------
-    // LOOP 1: WALLS (BACKGROUND)
-    // -----------------------------------------------------------
+    // STEP 2: DRAW BACKGROUND WALLS
     for (int cx = startChunk; cx <= endChunk; ++cx) {
         auto itBg = mBackgroundChunks.find(cx);
         if (itBg == mBackgroundChunks.end() || itBg->second.empty()) continue;
@@ -431,7 +396,7 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
 
         for (int y = 0; y < WORLD_HEIGHT; ++y) {
             float py = y * mTileSize;
-            if (py < top || py > bottom) continue;
+            if (py < top || py > bottom) continue; // Vertical culling
 
             for (int lx = 0; lx < CHUNK_WIDTH; ++lx) {
                 int blockID = bgBlocks[y * CHUNK_WIDTH + lx];
@@ -445,12 +410,9 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
                     sprite.setScale(scale, scale);
 
                     sf::Vector2f center(px + mTileSize/2, py + mTileSize/2);
-
-                    // 1. Calculamos la luz NORMAL (Antorchas + Ambiente)
                     sf::Color lightColor = calculateLight(center, ambientColor);
 
-                    // 2. TRUCO DE PROFUNDIDAD: Oscurecemos la pared un 50%
-                    // Así, incluso con una antorcha al lado, la pared se verá "al fondo"
+                    // Depth trick: Darken background walls by 50% so they visually sit "behind"
                     lightColor.r = static_cast<sf::Uint8>(lightColor.r * 0.5f);
                     lightColor.g = static_cast<sf::Uint8>(lightColor.g * 0.5f);
                     lightColor.b = static_cast<sf::Uint8>(lightColor.b * 0.5f);
@@ -462,12 +424,10 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
         }
     }
 
-    // -----------------------------------------------------------
-    // LOOP 2: FOREGROUND (BLOCKS)
-    // -----------------------------------------------------------
+    // STEP 3: DRAW FOREGROUND BLOCKS
     for (int cx = startChunk; cx <= endChunk; ++cx) {
         auto it = mChunks.find(cx);
-        if (it == mChunks.end()) continue; // Extra safety
+        if (it == mChunks.end()) continue;
 
         const auto& blocks = it->second;
 
@@ -486,7 +446,7 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
                     float scale = mTileSize / sprite.getLocalBounds().width;
                     sprite.setScale(scale, scale);
 
-                    if (blockID == 6) { // Torch always shines
+                    if (blockID == 6) { // Torches always render at max brightness
                         sprite.setColor(sf::Color::White);
                     } else {
                         sf::Vector2f center(px + mTileSize/2, py + mTileSize/2);
@@ -499,59 +459,32 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
         }
     }
 
-    // -----------------------------------------------------------
-    // LOOP 3: ITEMS
-    // -----------------------------------------------------------
-    // --- DRAW ITEMS ON THE GROUND ---
+    // STEP 4: DRAW DROPPED ITEMS
     for (const auto& item : mItems) {
         const sf::Texture* tex = getTexture(item.id);
         if (tex) {
-            sf::Sprite sprite(*tex);
-            sprite.setPosition(item.pos);
+            sf::Sprite itemSprite(*tex);
+            itemSprite.setPosition(item.pos);
 
-            // Set origin to center for nice rotation
-            sprite.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
+            // Center origin for correct placement and potential rotation
+            itemSprite.setOrigin(tex->getSize().x / 2.0f, tex->getSize().y / 2.0f);
 
-            // Other blocks (dirt, wood, etc) at 0.5
-            sprite.setScale(0.5f, 0.5f);
+            // Scale down standard blocks on the ground
+            itemSprite.setScale(0.5f, 0.5f);
 
-            sprite.setColor(calculateLight(item.pos, ambientColor));
-            window.draw(sprite);
+            itemSprite.setColor(calculateLight(item.pos, ambientColor));
+            window.draw(itemSprite);
         }
     }
 }
 
+// ==========================================
+// WORLD INTERACTION (Mining & Placing)
+// ==========================================
+
 /**
- * Spawns an item drop at the specified coordinates.
- * @param x Global X coordinate (in blocks).
- * @param y Global Y coordinate (in blocks).
- * @param id The ID of the item to spawn.
- */
-void World::spawnItem(int x, int y, int id) {
-    ItemDrop item;
-    item.id = id;
-
-    // Position: In the center of the broken block
-    item.pos = sf::Vector2f(x * mTileSize + mTileSize/2, y * mTileSize + mTileSize/2);
-
-    // Random Velocity ("Pop" Effect)
-    // rand() % 100 - 50 gives a number between -50 and 50
-    float randX = (rand() % 100 - 50) * 2.0f;
-    float randY = -150.0f; // Initial upward jump
-
-    item.vel = sf::Vector2f(randX, randY);
-    item.timeAlive = 0.0f;
-
-    mItems.push_back(item);
-}
-
-// --- MODIFY WORLD (MINING & BUILDING) ---
-/**
- * Sets a block at the specified coordinates.
- * Handles chunk generation if necessary and spawns drops when breaking blocks.
- * @param x Global X coordinate (in blocks).
- * @param y Global Y coordinate (in blocks).
- * @param type The new block ID.
+ * @brief Overwrites a block at the specified global coordinates.
+ * Called when the player mines or places a block.
  */
 void World::setBlock(int x, int y, int type) {
     if (y < 0 || y >= WORLD_HEIGHT) return;
@@ -563,24 +496,140 @@ void World::setBlock(int x, int y, int type) {
         generateChunk(chunkIndex);
     }
 
-    // 1. GET THE OLD BLOCK
-    int oldType = mChunks[chunkIndex][y * CHUNK_WIDTH + localX];
-
-    // 2. CHANGE THE BLOCK
     mChunks[chunkIndex][y * CHUNK_WIDTH + localX] = type;
 }
 
+// ==========================================
+// DROPPED ITEMS (Loot)
+// ==========================================
+
 /**
- * Loads all block textures from files.
- * Uses a helper lambda to handle errors and create fallback textures.
+ * @brief Spawns an item exactly at the center of a grid tile (used for mining).
+ */
+void World::spawnItem(int x, int y, int id) {
+    ItemDrop item;
+    item.id = id;
+
+    // Centered position
+    item.pos = sf::Vector2f(x * mTileSize + mTileSize/2, y * mTileSize + mTileSize/2);
+
+    // Initial "Pop" velocity (Random slight horizontal, fixed upward jump)
+    float randX = (rand() % 100 - 50) * 2.0f;
+    float randY = -150.0f;
+
+    item.vel = sf::Vector2f(randX, randY);
+    item.timeAlive = 0.0f;
+
+    mItems.push_back(item);
+}
+
+/**
+ * @brief Spawns an item at an absolute world position (used for dead mobs).
+ */
+void World::spawnItem(int id, sf::Vector2f pos) {
+    ItemDrop item;
+    item.id = id;
+    item.pos = pos;
+    item.vel = sf::Vector2f((rand() % 100 - 50), -150.0f);
+    item.timeAlive = 0.0f;
+
+    mItems.push_back(item);
+}
+
+/**
+ * @brief Updates physics (gravity) and magnetic attraction for dropped items.
+ * @param dt Time elapsed.
+ * @param playerPos Player's center coordinates for distance checks.
+ * @param inventory A map passed by reference to add picked-up items to.
+ */
+void World::update(sf::Time dt, sf::Vector2f playerPos, std::map<int, int>& inventory) {
+    // Iterate manually to safely delete items that are picked up
+    for (auto it = mItems.begin(); it != mItems.end(); ) {
+        ItemDrop& item = *it;
+        item.timeAlive += dt.asSeconds();
+
+        float dx = playerPos.x - item.pos.x;
+        float dy = playerPos.y - item.pos.y;
+        float dist = std::sqrt(dx*dx + dy*dy);
+
+        float magnetRange = 125.0f;
+        float pickupRange = 30.0f;
+        float magnetForce = 40.0f;
+
+        // 1. Magnetic Attraction towards player
+        if (dist < magnetRange && item.timeAlive > 0.5f) { // 0.5s delay before magnetism activates
+            float dirX = dx / dist;
+            float dirY = dy / dist;
+            item.vel.x += dirX * magnetForce;
+            item.vel.y += dirY * magnetForce;
+            item.vel *= 0.95f; // Dampen velocity to prevent orbiting
+        }
+        else {
+            // 2. Normal Gravity Fall
+            item.vel.y += 800.0f * dt.asSeconds();
+            item.vel.x *= 0.95f; // Horizontal air friction
+        }
+
+        item.pos += item.vel * dt.asSeconds();
+
+        // 3. Ground Collision (Only if not being magnetized)
+        if (dist >= magnetRange) {
+            int gridX = static_cast<int>(item.pos.x / mTileSize);
+            int gridY = static_cast<int>(item.pos.y / mTileSize);
+
+            // If inside a solid block, snap to grid top and stop falling
+            if (getBlock(gridX, gridY) != 0) {
+                item.pos.y = gridY * mTileSize;
+                item.vel.y = 0;
+                item.vel.x *= 0.5f; // Hard friction against ground
+            }
+        }
+
+        // 4. Pickup Event
+        if (dist < pickupRange && item.timeAlive > 0.2f) {
+            inventory[item.id]++; // Add to temporary pickup map
+            std::cout << "Picked up! ID: " << item.id << std::endl;
+
+            // Erase from world and keep iterator valid
+            it = mItems.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// ==========================================
+// ASSET MANAGEMENT
+// ==========================================
+
+const sf::Texture* World::getTexture(int id) const {
+    auto it = mTextures.find(id);
+    if (it != mTextures.end()) return &it->second;
+    return nullptr;
+}
+
+const sf::Texture* World::getHeldTexture(int id) const {
+    auto it = mHeldTextures.find(id);
+    if (it != mHeldTextures.end()) return &it->second;
+    return nullptr;
+}
+
+const sf::Texture* World::getArmorAnimTexture(int id) const {
+    auto it = mArmorAnimTextures.find(id);
+    if (it != mArmorAnimTextures.end()) return &it->second;
+    return nullptr;
+}
+
+/**
+ * @brief Bulk loads all textures from disk into memory.
  */
 void World::loadTextures() {
-    // Helper lambda to load a texture easily
+    // Helper lambda for general block/item UI textures
     auto load = [&](int id, const std::string& filename) {
         sf::Texture tex;
         if (!tex.loadFromFile(filename)) {
             std::cerr << "Error loading: " << filename << std::endl;
-            // Create a fallback magenta square if file is missing
+            // Generate a pink placeholder texture if file is missing
             sf::Image img;
             img.create(32, 32, sf::Color::Magenta);
             tex.loadFromImage(img);
@@ -588,17 +637,21 @@ void World::loadTextures() {
         mTextures[id] = tex;
     };
 
-    // --- NUEVO: CARGAR TEXTURAS PROFESIONALES (ARMAS EN MANO) ---
+    // Helper lambda for high-res player hand tool textures
     auto loadHeld = [&](int id, const std::string& filename) {
         sf::Texture tex;
-        if (tex.loadFromFile(filename)) {
-            mHeldTextures[id] = tex;
-        } else {
-            std::cerr << "Error: Faltan los sprites de mano profesionales: " << filename << std::endl;
-        }
+        if (tex.loadFromFile(filename)) mHeldTextures[id] = tex;
+        else std::cerr << "Error loading held sprite: " << filename << std::endl;
     };
 
-    // Debes crear estas imágenes en tu carpeta assets (Ej: 64x64 o 128x128 con mango largo)
+    // Helper lambda for animated armor spritesheets
+    auto loadArmorAnim = [&](int id, const std::string& filename) {
+        sf::Texture tex;
+        if (tex.loadFromFile(filename)) mArmorAnimTextures[id] = tex;
+        else std::cerr << "Error loading armor anim: " << filename << std::endl;
+    };
+
+    // --- Load Held Tools ---
     loadHeld(21, "assets/Pickaxewood_hands.png");
     loadHeld(22, "assets/Pickaxestone_hands.png");
     loadHeld(23, "assets/Pickaxeiron_hands.png");
@@ -608,255 +661,115 @@ void World::loadTextures() {
     loadHeld(32, "assets/Swordstone_hands.png");
     loadHeld(33, "assets/Swordiron_hands.png");
     loadHeld(34, "assets/Swordtungsten_hands.png");
-
-    // --- NUEVO: ARCO EN MANO ---
     loadHeld(35, "assets/Bow_hands.png");
 
-    // --- LOAD YOUR ASSETS HERE ---
-    // Make sure these files exist in your "assets" folder!
-    load(1, "assets/Dirt.png");  // ID 1: Dirt
-    load(2, "assets/Grass.png");  // ID 2: Grass
-    load(3, "assets/Stone.png");  // ID 3: Stone
-    load(4, "assets/Tree.png");   // ID 4: Tree
-    load(5, "assets/Leaves.png");   // ID 5: Leaves
-    load(6, "assets/Torch.png"); // ID 6: Torch
-    load(7, "assets/Coal.png"); // ID 7: Coal
-    load(8, "assets/Copper.png"); // ID 8: Copper
-    load(9, "assets/Iron.png"); // ID 9: Iron
-    load(10, "assets/Cobalt.png"); // ID 10: Cobalt
-    load(11, "assets/Tungsten.png"); // ID 11: Tungsten
-    load(12, "assets/Bedrock.png"); // ID 12: Bedrock
-    // --- NUEVOS BIOMAS ---
-    load(13, "assets/Sand.png");   // Arena
-    load(14, "assets/Snow.png");   // Nieve
-    // DOORS : OPEN - CLOSED
-    load(25, "assets/DoorBottomClosed.png"); // ID 25: Door
-    load(26, "assets/DoorMidClosed.png"); // ID 25: Door
-    load(27, "assets/DoorTopClosed.png"); // ID 25: Door
-    load(28, "assets/DoorBottomOpen.png"); // ID 25: Door
-    load(29, "assets/DoorMidOpen.png"); // ID 25: Door
-    load(30, "assets/DoorTopOpen.png"); // ID 25: Door
+    // --- Load Blocks & Items ---
+    load(1, "assets/Dirt.png");
+    load(2, "assets/Grass.png");
+    load(3, "assets/Stone.png");
+    load(4, "assets/Tree.png");
+    load(5, "assets/Leaves.png");
+    load(6, "assets/Torch.png");
+    load(7, "assets/Coal.png");
+    load(8, "assets/Copper.png");
+    load(9, "assets/Iron.png");
+    load(10, "assets/Cobalt.png");
+    load(11, "assets/Tungsten.png");
+    load(12, "assets/Bedrock.png");
+    load(13, "assets/Sand.png");
+    load(14, "assets/Snow.png");
 
+    // Doors
+    load(25, "assets/DoorBottomClosed.png");
+    load(26, "assets/DoorMidClosed.png");
+    load(27, "assets/DoorTopClosed.png");
+    load(28, "assets/DoorBottomOpen.png");
+    load(29, "assets/DoorMidOpen.png");
+    load(30, "assets/DoorTopOpen.png");
 
+    // Utilities
+    load(40, "assets/CraftingTable.png");
+    load(41, "assets/Furnace.png");
+    load(42, "assets/Chest.png");
 
-    // --- BLOQUES INTERACTIVOS ---
-    sf::Texture texTable;
-    if (texTable.loadFromFile("assets/CraftingTable.png")) {
-        mTextures[40] = texTable;
-    }
-
-    sf::Texture texFurnace;
-    if (texFurnace.loadFromFile("assets/Furnace.png")) {
-        mTextures[41] = texFurnace;
-    }
-
-    sf::Texture texChest;
-    if (texChest.loadFromFile("assets/Chest.png")) {
-        mTextures[42] = texChest;
-    }
-
-    // --- TOOLS ---
+    // Inventory Tools
     load(21, "assets/PickaxeWood.png");
     load(22, "assets/PickaxeStone.png");
     load(23, "assets/PickaxeIron.png");
     load(24, "assets/Pickaxetungsten.png");
 
-    // --- SWORDS ---
     load(31, "assets/SwordWood.png");
     load(32, "assets/SwordStone.png");
     load(33, "assets/SwordIron.png");
     load(34, "assets/SwordTungsten.png");
-
-    // --- NUEVO: ARCO Y FLECHA EN INVENTARIO ---
     load(35, "assets/Bow.png");
     load(36, "assets/Arrow.png");
 
-    // --- MEAT ---
+    // Consumables & Materials
     load(50, "assets/Meat.png");
-
-    // --- LINGOTES Y MATERIALES ---
     load(51, "assets/IronIngot.png");
     load(52, "assets/CopperIngot.png");
     load(53, "assets/CobaltIngot.png");
     load(54, "assets/TungstenIngot.png");
+
+    // Inventory Armor
+    load(61, "assets/WoodHelmet.png");
+    load(62, "assets/WoodChest.png");
+    load(63, "assets/WoodLegs.png");
+    load(64, "assets/WoodBoots.png");
+    load(70, "assets/MeatMedallion.png");
+
+    // --- Load Animated Armor ---
+    loadArmorAnim(61, "assets/WoodHelmet_Anim.png");
+    loadArmorAnim(62, "assets/WoodChest_Anim.png");
+    loadArmorAnim(63, "assets/WoodLegs_Anim.png");
+    loadArmorAnim(64, "assets/WoodBoots_Anim.png");
 }
 
-const sf::Texture* World::getTexture(int id) const {
-    // Search for the texture with the given ID.
-    auto it = mTextures.find(id);
-    if (it != mTextures.end()) {
-        // If it exists, return a pointer to it.
-        return &it->second;
-    }
-    // Otherwise, return a null pointer.
-    return nullptr;
-}
+// ==========================================
+// FILE I/O (SAVE AND LOAD)
+// ==========================================
 
 /**
- * Updates the world state.
- * Handles item physics (gravity, magnetism) and pickup logic.
- * @param dt Delta time (time elapsed since last frame).
- * @param playerPos The player's current position.
- * @param inventory Reference to the player's inventory map.
- */
-void World::update(sf::Time dt, sf::Vector2f playerPos, std::map<int, int>& inventory) {
-
-    // WE USE ITERATORS (auto it) INSTEAD OF INDICES (i)
-    // This prevents "memory corruption" errors when deleting.
-    for (auto it = mItems.begin(); it != mItems.end(); ) {
-
-        ItemDrop& item = *it; // Access the current item
-        item.timeAlive += dt.asSeconds();
-
-        // --- PHYSICS CALCULATION ---
-        float dx = playerPos.x - item.pos.x;
-        float dy = playerPos.y - item.pos.y;
-        float dist = std::sqrt(dx*dx + dy*dy);
-
-        float magnetRange = 125.0f;
-        float pickupRange = 30.0f;
-        float magnetForce = 40.0f;
-
-        // 1. MAGNET LOGIC
-        if (dist < magnetRange && item.timeAlive > 0.5f) {
-            float dirX = dx / dist;
-            float dirY = dy / dist;
-            item.vel.x += dirX * magnetForce;
-            item.vel.y += dirY * magnetForce;
-            item.vel *= 0.95f;
-        }
-        else {
-            // 2. NORMAL GRAVITY
-            item.vel.y += 800.0f * dt.asSeconds();
-            item.vel.x *= 0.95f;
-        }
-
-        // Apply movement
-        item.pos += item.vel * dt.asSeconds();
-
-        // 3. GROUND COLLISION (If far away)
-        if (dist >= magnetRange) {
-            int gridX = static_cast<int>(item.pos.x / mTileSize);
-            int gridY = static_cast<int>(item.pos.y / mTileSize);
-
-            if (getBlock(gridX, gridY) != 0) {
-                item.pos.y = gridY * mTileSize;
-                item.vel.y = 0;
-                item.vel.x *= 0.5f;
-            }
-        }
-
-        // 4. PICKUP ZONE (HERE WAS THE ERROR: NOW THERE IS ONLY ONE BLOCK)
-        if (dist < pickupRange && item.timeAlive > 0.2f) {
-
-            // A) Save ID
-            int id = item.id;
-
-            // B) Add to inventory
-            inventory[id]++;
-
-            // C) Debug
-            std::cout << "Picked up! You have: " << inventory[id] << " of block ID " << id << std::endl;
-
-            // D) SAFELY DELETE
-            // erase returns the iterator to the NEXT valid element.
-            // So we don't lose the reference.
-            it = mItems.erase(it);
-
-        } else {
-            // Only advance if we have NOT deleted anything
-            ++it;
-        }
-    }
-}
-
-/**
- * Saves the world state to a file stream.
- * Serializes chunks (blocks and background walls).
- * @param file The output file stream.
+ * @brief Serializes the map structure to a binary file stream.
  */
 void World::saveToStream(std::ofstream& file) {
-    // 1. Save chunk count
     size_t count = mChunks.size();
     file.write(reinterpret_cast<const char*>(&count), sizeof(count));
 
-    // 2. Iterate through each Chunk and save it
     for (const auto& pair : mChunks) {
         int chunkX = pair.first;
         const std::vector<int>& blocks = pair.second;
-        const std::vector<int>& walls = mBackgroundChunks[chunkX]; // Don't forget walls
+        const std::vector<int>& walls = mBackgroundChunks[chunkX];
 
-        // A) Save Chunk X coordinate
         file.write(reinterpret_cast<const char*>(&chunkX), sizeof(chunkX));
-
-        // B) Save blocks (Full vector at once)
-        // size() * sizeof(int) calculates the size in bytes of the entire vector
         file.write(reinterpret_cast<const char*>(blocks.data()), blocks.size() * sizeof(int));
-
-        // C) Save walls
         file.write(reinterpret_cast<const char*>(walls.data()), walls.size() * sizeof(int));
     }
 }
 
 /**
- * Loads the world state from a file stream.
- * Deserializes chunks (blocks and background walls).
- * @param file The input file stream.
+ * @brief Deserializes the map structure from a binary file stream.
  */
 void World::loadFromStream(std::ifstream& file) {
-    // 1. Clear current world (Important to not mix maps)
     mChunks.clear();
     mBackgroundChunks.clear();
-    mItems.clear(); // Clear ground items too to avoid bugs
+    mItems.clear(); // Clear dropped items to prevent load-duplication
 
-    // 2. Read how many chunks are saved
     size_t count = 0;
     file.read(reinterpret_cast<char*>(&count), sizeof(count));
 
-    // 3. Reconstruct each Chunk
     for (size_t i = 0; i < count; ++i) {
         int chunkX = 0;
-
-        // A) Read X coordinate
         file.read(reinterpret_cast<char*>(&chunkX), sizeof(chunkX));
 
-        // Prepare empty vectors of correct size
         std::vector<int> blocks(CHUNK_WIDTH * WORLD_HEIGHT);
         std::vector<int> walls(CHUNK_WIDTH * WORLD_HEIGHT);
 
-        // B) Read Block data
         file.read(reinterpret_cast<char*>(blocks.data()), blocks.size() * sizeof(int));
-
-        // C) Read Wall data
         file.read(reinterpret_cast<char*>(walls.data()), walls.size() * sizeof(int));
 
-        // Insert into map
         mChunks[chunkX] = blocks;
         mBackgroundChunks[chunkX] = walls;
     }
-}
-
-/**
- * Spawns an item drop at a specific position (e.g., from a mob).
- * @param id The ID of the item to spawn.
- * @param pos The position to spawn the item at.
- */
-void World::spawnItem(int id, sf::Vector2f pos) {
-    ItemDrop item;
-    item.id = id;
-    item.pos = pos;
-
-    // Give it a small "jump" upwards so the drop feels satisfying
-    item.vel = sf::Vector2f((rand() % 100 - 50), -150.0f);
-    item.timeAlive = 0.0f;
-
-    mItems.push_back(item);
-}
-
-const sf::Texture* World::getHeldTexture(int id) const {
-    auto it = mHeldTextures.find(id);
-    if (it != mHeldTextures.end()) {
-        return &it->second;
-    }
-    return nullptr;
 }

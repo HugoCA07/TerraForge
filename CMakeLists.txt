@@ -35,6 +35,10 @@ add_executable(TerraForge
         src/Mob.h
         src/Projectile.cpp
         src/Projectile.h
+        src/Boss.cpp
+        src/Boss.h
+        src/TRex.cpp
+        src/TRex.h
 )
 
 # --- Linking ---
