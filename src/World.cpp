@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cmath>
 #include <algorithm>
+#include "Game.h"
 
 /**
  * @brief Constructor for the World class.
@@ -106,29 +107,28 @@ void World::generateChunk(int chunkX) {
 
             // Background Walls (Generated based on depth)
             if (y > surfaceY) {
-                if (y < surfaceY + 10) bgID = 1; // Dirt wall layer
-                else bgID = 3;                   // Deep Stone wall layer
+                if (y < surfaceY + 10) bgID = ItemID::BG_DIRT; // Dirt wall layer
+                else bgID = ItemID::BG_STONE;                  // Deep Stone wall layer
             }
 
             // Foreground Solid Blocks
             if (y >= WORLD_HEIGHT - 2) {
-                blockID = 12; // Unbreakable Bedrock bottom layer
+                blockID = ItemID::BEDROCK; // Unbreakable Bedrock bottom layer
             }
             else if (y >= surfaceY) {
                 int depthFromSurface = y - surfaceY;
 
                 // Apply biome overlays overrides based on the calculated depth curve
                 if (isDesert && depthFromSurface <= biomeDepth) {
-                    blockID = 13; // Sand block filling the desert pocket
+                    blockID = ItemID::SAND; // Sand block filling the desert pocket
                 }
                 else if (isSnow && depthFromSurface <= biomeDepth) {
-                    blockID = 14; // Snow block filling the tundra pocket
+                    blockID = ItemID::SNOW; // Snow block filling the tundra pocket
                 }
                 else {
-                    // Standard geology generation (Grass -> Dirt -> Stone)
-                    if (depthFromSurface == 0) blockID = 2;       // Grass layer
-                    else if (depthFromSurface < 5) blockID = 1;   // Dirt layer
-                    else blockID = 3;                             // Deep Stone layer
+                    // Standard geology generation
+                    if (depthFromSurface < 5) blockID = ItemID::DIRT;   // Dirt layer
+                    else blockID = ItemID::STONE;                       // Deep Stone layer
                 }
             }
 
@@ -150,7 +150,7 @@ void World::generateChunk(int chunkX) {
             int index = y * CHUNK_WIDTH + localX;
 
             // Only carve through stone
-            if (newChunk[index] == 3) {
+            if (newChunk[index] == ItemID::STONE) {
                 // A) SPAGHETTI CAVES (Interconnected tunnels)
                 // Combine 3 different sine waves for a chaotic but connected pattern
                 float n1 = std::sin((globalX + seed) / 20.0f);
@@ -182,8 +182,8 @@ void World::generateChunk(int chunkX) {
             for (int y = surfaceY + 10; y < WORLD_HEIGHT - 5; ++y) {
                 int index = y * CHUNK_WIDTH + localX;
 
-                // BIOME SHIELD: Do not smooth Sand or Snow, so they don't turn into stone
-                if (tempChunk[index] == 13 || tempChunk[index] == 14) {
+                // BIOME SHIELD: Do not smooth Sand or Snow
+                if (tempChunk[index] == ItemID::SAND || tempChunk[index] == ItemID::SNOW) {
                     continue;
                 }
 
@@ -207,9 +207,9 @@ void World::generateChunk(int chunkX) {
 
                 // Survival rules for smoothing
                 if (neighborWalls > 4) {
-                    newChunk[index] = 3; // Become/Stay solid stone
+                    newChunk[index] = ItemID::STONE; // Become/Stay solid stone
                 } else if (neighborWalls < 4) {
-                    newChunk[index] = 0; // Become/Stay air
+                    newChunk[index] = ItemID::AIR; // Become/Stay air
                 }
             }
         }
@@ -236,7 +236,7 @@ void World::generateChunk(int chunkX) {
                     if (nx >= 0 && nx < CHUNK_WIDTH && ny >= 0 && ny < WORLD_HEIGHT) {
                         int index = ny * CHUNK_WIDTH + nx;
                         // ONLY overwrite Stone (Do not destroy caves or dirt)
-                        if (newChunk[index] == 3) {
+                        if (newChunk[index] == ItemID::STONE) {
                             newChunk[index] = id;
                         }
                     }
@@ -246,11 +246,11 @@ void World::generateChunk(int chunkX) {
     };
 
     // --- ORE CONFIGURATION (Attempts, ID, Min Depth, Max Depth, Spread % ) ---
-    spawnVein(6, 7, 20, 150, 80);  // COAL: Very common, large veins, shallow
-    spawnVein(4, 8, 30, 150, 70);  // COPPER: Common, medium veins
-    spawnVein(3, 9, 50, 150, 70);  // IRON: Less common, medium veins
-    spawnVein(2, 10, 100, 150, 50); // COBALT: Rare, deep, small veins
-    spawnVein(1, 11, 130, 150, 40); // TUNGSTEN: Very rare, very deep, tiny veins
+    spawnVein(6, ItemID::COAL, 20, 150, 80);
+    spawnVein(4, ItemID::COPPER, 30, 150, 70);
+    spawnVein(3, ItemID::IRON, 50, 150, 70);
+    spawnVein(2, ItemID::COBALT, 100, 150, 50);
+    spawnVein(1, ItemID::TUNGSTEN, 130, 150, 40);
 
     // ---------------------------------------------------------
     // STEP 3: SURFACE DECORATION (Trees)
@@ -261,8 +261,8 @@ void World::generateChunk(int chunkX) {
 
         int surfaceBlockID = newChunk[surfaceY * CHUNK_WIDTH + localX];
 
-        // Trees only grow on GRASS (ID 2), with a random distribution, avoiding chunk edges
-        if (surfaceBlockID == 2 && (std::abs(globalX * 437) % 100) < 10 && localX > 2 && localX < CHUNK_WIDTH - 3) {
+        // Trees only grow on DIRT (ID 1)
+        if (surfaceBlockID == ItemID::DIRT && (std::abs(globalX * 437) % 100) < 10 && localX > 2 && localX < CHUNK_WIDTH - 3) {
             int treeHeight = 5 + (rand() % 11);
             int treeTopY = surfaceY - treeHeight;
 
@@ -277,14 +277,14 @@ void World::generateChunk(int chunkX) {
                     if (leafY > 0 && leafY < WORLD_HEIGHT) {
                         int idx = leafY * CHUNK_WIDTH + leafX;
                         // Don't overwrite existing blocks with leaves
-                        if (newChunk[idx] == 0) newChunk[idx] = 5;
+                        if (newChunk[idx] == ItemID::AIR) newChunk[idx] = ItemID::LEAVES;
                     }
                 }
             }
             // Generate Trunk (Wood)
             for (int i = 1; i <= treeHeight; ++i) {
                 int trunkY = surfaceY - i;
-                if (trunkY > 0) newChunk[trunkY * CHUNK_WIDTH + localX] = 4;
+                if (trunkY > 0) newChunk[trunkY * CHUNK_WIDTH + localX] = ItemID::WOOD;
             }
         }
     }
@@ -335,10 +335,10 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
                 if (blockY < top - 200 || blockY > bottom + 200) continue;
 
                 for (int lx = 0; lx < CHUNK_WIDTH; ++lx) {
-                    if (blocks[y * CHUNK_WIDTH + lx] == 6) { // ID 6 = Torch
-                         float wx = (cx * CHUNK_WIDTH + lx) * mTileSize + mTileSize/2.f;
-                         float wy = y * mTileSize + mTileSize/2.f;
-                         lightSources.push_back(sf::Vector2f(wx, wy));
+                    if (blocks[y * CHUNK_WIDTH + lx] == ItemID::TORCH) { // ¡Cambiado ID 6 a TORCH!
+                        float wx = (cx * CHUNK_WIDTH + lx) * mTileSize + mTileSize/2.f;
+                        float wy = y * mTileSize + mTileSize/2.f;
+                        lightSources.push_back(sf::Vector2f(wx, wy));
                     }
                 }
             }
@@ -437,23 +437,54 @@ void World::render(sf::RenderWindow& window, sf::Color ambientColor) {
 
             for (int lx = 0; lx < CHUNK_WIDTH; ++lx) {
                 int blockID = blocks[y * CHUNK_WIDTH + lx];
-                if (blockID != 0 && mTextures.count(blockID)) {
-                    sprite.setTexture(mTextures[blockID]);
 
+                if (blockID != 0) {
                     float px = (cx * CHUNK_WIDTH + lx) * mTileSize;
-                    sprite.setPosition(px, py);
+                    sf::Vector2f center(px + mTileSize/2, py + mTileSize/2);
 
-                    float scale = mTileSize / sprite.getLocalBounds().width;
-                    sprite.setScale(scale, scale);
+                    // ==========================================
+                    // --- DIBUJADO DE AUTOTILING (TIERRA, PIEDRA, ETC) ---
+                    // ==========================================
+                    if (mAutotileTextures.count(blockID)) {
+                        sf::Sprite autoSprite(mAutotileTextures[blockID]);
 
-                    if (blockID == 6) { // Torches always render at max brightness
-                        sprite.setColor(sf::Color::White);
-                    } else {
-                        sf::Vector2f center(px + mTileSize/2, py + mTileSize/2);
-                        sprite.setColor(calculateLight(center, ambientColor));
+                        // Calculamos la X global real en el mundo
+                        int globalX = cx * CHUNK_WIDTH + lx;
+
+                        // Pasamos el propio blockID como target
+                        int mask = getBitmask(globalX, y, blockID);
+
+                        // Calculamos Fila y Columna
+                        int col = mask % 4;
+                        int row = mask / 4;
+
+                        // Recortamos la textura y posicionamos
+                        autoSprite.setTextureRect(sf::IntRect(col * mTileSize, row * mTileSize, mTileSize, mTileSize));
+                        autoSprite.setPosition(px, py);
+
+                        // Iluminación dinámica
+                        autoSprite.setColor(calculateLight(center, ambientColor));
+
+                        window.draw(autoSprite);
                     }
+                    // ==========================================
+                    // --- DIBUJADO NORMAL (MADERA, MINERALES, ETC) ---
+                    // ==========================================
+                    else if (mTextures.count(blockID)) {
+                        sprite.setTexture(mTextures[blockID]);
+                        sprite.setPosition(px, py);
 
-                    window.draw(sprite);
+                        float scale = mTileSize / sprite.getLocalBounds().width;
+                        sprite.setScale(scale, scale);
+
+                        if (blockID == ItemID::TORCH) { // Torches always render at max brightness
+                            sprite.setColor(sf::Color::White);
+                        } else {
+                            sprite.setColor(calculateLight(center, ambientColor));
+                        }
+
+                        window.draw(sprite);
+                    }
                 }
             }
         }
@@ -624,12 +655,10 @@ const sf::Texture* World::getArmorAnimTexture(int id) const {
  * @brief Bulk loads all textures from disk into memory.
  */
 void World::loadTextures() {
-    // Helper lambda for general block/item UI textures
     auto load = [&](int id, const std::string& filename) {
         sf::Texture tex;
         if (!tex.loadFromFile(filename)) {
             std::cerr << "Error loading: " << filename << std::endl;
-            // Generate a pink placeholder texture if file is missing
             sf::Image img;
             img.create(32, 32, sf::Color::Magenta);
             tex.loadFromImage(img);
@@ -637,14 +666,12 @@ void World::loadTextures() {
         mTextures[id] = tex;
     };
 
-    // Helper lambda for high-res player hand tool textures
     auto loadHeld = [&](int id, const std::string& filename) {
         sf::Texture tex;
         if (tex.loadFromFile(filename)) mHeldTextures[id] = tex;
         else std::cerr << "Error loading held sprite: " << filename << std::endl;
     };
 
-    // Helper lambda for animated armor spritesheets
     auto loadArmorAnim = [&](int id, const std::string& filename) {
         sf::Texture tex;
         if (tex.loadFromFile(filename)) mArmorAnimTextures[id] = tex;
@@ -652,78 +679,87 @@ void World::loadTextures() {
     };
 
     // --- Load Held Tools ---
-    loadHeld(21, "assets/Pickaxewood_hands.png");
-    loadHeld(22, "assets/Pickaxestone_hands.png");
-    loadHeld(23, "assets/Pickaxeiron_hands.png");
-    loadHeld(24, "assets/Pickaxetungsten_hands.png");
+    loadHeld(ItemID::WOOD_PICKAXE, "assets/Pickaxewood_hands.png");
+    loadHeld(ItemID::STONE_PICKAXE, "assets/Pickaxestone_hands.png");
+    loadHeld(ItemID::IRON_PICKAXE, "assets/Pickaxeiron_hands.png");
+    loadHeld(ItemID::TUNGSTEN_PICKAXE, "assets/Pickaxetungsten_hands.png");
 
-    loadHeld(31, "assets/Swordwood_hands.png");
-    loadHeld(32, "assets/Swordstone_hands.png");
-    loadHeld(33, "assets/Swordiron_hands.png");
-    loadHeld(34, "assets/Swordtungsten_hands.png");
-    loadHeld(35, "assets/Bow_hands.png");
+    loadHeld(ItemID::WOOD_SWORD, "assets/Swordwood_hands.png");
+    loadHeld(ItemID::STONE_SWORD, "assets/Swordstone_hands.png");
+    loadHeld(ItemID::IRON_SWORD, "assets/Swordiron_hands.png");
+    loadHeld(ItemID::TUNGSTEN_SWORD, "assets/Swordtungsten_hands.png");
+    loadHeld(ItemID::BOW, "assets/Bow_hands.png");
 
     // --- Load Blocks & Items ---
-    load(1, "assets/Dirt.png");
-    load(2, "assets/Grass.png");
-    load(3, "assets/Stone.png");
-    load(4, "assets/Tree.png");
-    load(5, "assets/Leaves.png");
-    load(6, "assets/Torch.png");
-    load(7, "assets/Coal.png");
-    load(8, "assets/Copper.png");
-    load(9, "assets/Iron.png");
-    load(10, "assets/Cobalt.png");
-    load(11, "assets/Tungsten.png");
-    load(12, "assets/Bedrock.png");
-    load(13, "assets/Sand.png");
-    load(14, "assets/Snow.png");
+    load(ItemID::DIRT, "assets/Dirt.png");
+    load(ItemID::STONE, "assets/Stone.png");
+    load(ItemID::WOOD, "assets/Tree.png");
+    load(ItemID::LEAVES, "assets/Leaves.png");
+    load(ItemID::TORCH, "assets/Torch.png");
+    load(ItemID::SAND, "assets/Sand.png");
+    load(ItemID::SNOW, "assets/Snow.png");
+    load(ItemID::BEDROCK, "assets/Bedrock.png");
+
+    // --- Background Walls ---
+    load(ItemID::BG_DIRT, "assets/Dirt.png");
+    load(ItemID::BG_STONE, "assets/Stone.png");
+
+    // Ores
+    load(ItemID::COAL, "assets/Coal.png");
+    load(ItemID::COPPER, "assets/Copper.png");
+    load(ItemID::IRON, "assets/Iron.png");
+    load(ItemID::COBALT, "assets/Cobalt.png");
+    load(ItemID::TUNGSTEN, "assets/Tungsten.png");
 
     // Doors
-    load(25, "assets/DoorBottomClosed.png");
-    load(26, "assets/DoorMidClosed.png");
-    load(27, "assets/DoorTopClosed.png");
-    load(28, "assets/DoorBottomOpen.png");
-    load(29, "assets/DoorMidOpen.png");
-    load(30, "assets/DoorTopOpen.png");
+    load(ItemID::DOOR, "assets/DoorBottomClosed.png");
+    load(ItemID::DOOR_MID, "assets/DoorMidClosed.png");
+    load(ItemID::DOOR_TOP, "assets/DoorTopClosed.png");
+    load(ItemID::DOOR_OPEN, "assets/DoorBottomOpen.png");
+    load(ItemID::DOOR_OPEN_MID, "assets/DoorMidOpen.png");
+    load(ItemID::DOOR_OPEN_TOP, "assets/DoorTopOpen.png");
 
     // Utilities
-    load(40, "assets/CraftingTable.png");
-    load(41, "assets/Furnace.png");
-    load(42, "assets/Chest.png");
+    load(ItemID::CRAFTING_TABLE, "assets/CraftingTable.png");
+    load(ItemID::FURNACE, "assets/Furnace.png");
+    load(ItemID::CHEST, "assets/Chest.png");
 
     // Inventory Tools
-    load(21, "assets/PickaxeWood.png");
-    load(22, "assets/PickaxeStone.png");
-    load(23, "assets/PickaxeIron.png");
-    load(24, "assets/Pickaxetungsten.png");
+    load(ItemID::WOOD_PICKAXE, "assets/PickaxeWood.png");
+    load(ItemID::STONE_PICKAXE, "assets/PickaxeStone.png");
+    load(ItemID::IRON_PICKAXE, "assets/PickaxeIron.png");
+    load(ItemID::TUNGSTEN_PICKAXE, "assets/Pickaxetungsten.png");
 
-    load(31, "assets/SwordWood.png");
-    load(32, "assets/SwordStone.png");
-    load(33, "assets/SwordIron.png");
-    load(34, "assets/SwordTungsten.png");
-    load(35, "assets/Bow.png");
-    load(36, "assets/Arrow.png");
+    load(ItemID::WOOD_SWORD, "assets/SwordWood.png");
+    load(ItemID::STONE_SWORD, "assets/SwordStone.png");
+    load(ItemID::IRON_SWORD, "assets/SwordIron.png");
+    load(ItemID::TUNGSTEN_SWORD, "assets/SwordTungsten.png");
+    load(ItemID::BOW, "assets/Bow.png");
+    load(ItemID::ARROW, "assets/Arrow.png");
 
     // Consumables & Materials
-    load(50, "assets/Meat.png");
-    load(51, "assets/IronIngot.png");
-    load(52, "assets/CopperIngot.png");
-    load(53, "assets/CobaltIngot.png");
-    load(54, "assets/TungstenIngot.png");
+    load(ItemID::MEAT, "assets/Meat.png");
+    load(ItemID::MEAT_MEDALLION, "assets/MeatMedallion.png");
+    load(ItemID::IRON_INGOT, "assets/IronIngot.png");
+    load(ItemID::COPPER_INGOT, "assets/CopperIngot.png");
+    load(ItemID::COBALT_INGOT, "assets/CobaltIngot.png");
+    load(ItemID::TUNGSTEN_INGOT, "assets/TungstenIngot.png");
 
     // Inventory Armor
-    load(61, "assets/WoodHelmet.png");
-    load(62, "assets/WoodChest.png");
-    load(63, "assets/WoodLegs.png");
-    load(64, "assets/WoodBoots.png");
-    load(70, "assets/MeatMedallion.png");
+    load(ItemID::WOOD_HELMET, "assets/WoodHelmet.png");
+    load(ItemID::WOOD_CHEST, "assets/WoodChest.png");
+    load(ItemID::WOOD_LEGS, "assets/WoodLegs.png");
+    load(ItemID::WOOD_BOOTS, "assets/WoodBoots.png");
 
     // --- Load Animated Armor ---
-    loadArmorAnim(61, "assets/WoodHelmet_Anim.png");
-    loadArmorAnim(62, "assets/WoodChest_Anim.png");
-    loadArmorAnim(63, "assets/WoodLegs_Anim.png");
-    loadArmorAnim(64, "assets/WoodBoots_Anim.png");
+    loadArmorAnim(ItemID::WOOD_HELMET, "assets/WoodHelmet_Anim.png");
+    loadArmorAnim(ItemID::WOOD_CHEST, "assets/WoodChest_Anim.png");
+    loadArmorAnim(ItemID::WOOD_LEGS, "assets/WoodLegs_Anim.png");
+    loadArmorAnim(ItemID::WOOD_BOOTS, "assets/WoodBoots_Anim.png");
+
+    if (!mAutotileTextures[ItemID::DIRT].loadFromFile("assets/dirt_autotile.png")) {
+        std::cerr << "Error: Faltan las texturas de autotiling de la Tierra" << std::endl;
+    }
 }
 
 // ==========================================
@@ -772,4 +808,53 @@ void World::loadFromStream(std::ifstream& file) {
         mChunks[chunkX] = blocks;
         mBackgroundChunks[chunkX] = walls;
     }
+}
+
+// ==========================================
+// ESCÁNER DE VECINOS (BITMASKING UNIVERSAL Y FUSIÓN)
+// ==========================================
+int World::getBitmask(int x, int y, int targetID) {
+    int mask = 0;
+
+    int top    = getBlock(x, y - 1);
+    int right  = getBlock(x + 1, y);
+    int bottom = getBlock(x, y + 1);
+    int left   = getBlock(x - 1, y);
+
+    // --- NUEVO: REGLAS DE FUSIÓN ENTRE DISTINTOS BLOQUES ---
+    auto connects = [&](int neighbor) {
+        // 1. Siempre nos conectamos perfectamente con nosotros mismos
+        if (neighbor == targetID) return true;
+
+        // 2. Regla de la Tierra: Se fusiona con la Piedra, Bedrock y los Minerales
+        if (targetID == ItemID::DIRT) {
+            if (neighbor == ItemID::STONE || neighbor == ItemID::BEDROCK ||
+               (neighbor >= ItemID::COAL && neighbor <= ItemID::TUNGSTEN)) {
+                return true;
+               }
+        }
+
+        // (En el futuro, si haces Autotile para la Piedra, añadirás su regla aquí)
+        // if (targetID == ItemID::STONE) { ... }
+
+        return false; // Si no cumple nada, no nos fusionamos
+    };
+
+    // Evaluamos a los 4 vecinos con nuestras nuevas reglas
+    if (connects(top))    mask += 1;
+    if (connects(right))  mask += 2;
+    if (connects(bottom)) mask += 4;
+    if (connects(left))   mask += 8;
+
+    return mask;
+}
+
+// ==========================================
+// FÍSICAS DE BLOQUES (COLISIONES)
+// ==========================================
+bool World::isSolid(int blockID) {
+    return (blockID != ItemID::AIR && blockID != ItemID::WOOD &&
+            blockID != ItemID::LEAVES && blockID != ItemID::TORCH &&
+            blockID != ItemID::DOOR_OPEN && blockID != ItemID::DOOR_OPEN_MID &&
+            blockID != ItemID::DOOR_OPEN_TOP);
 }

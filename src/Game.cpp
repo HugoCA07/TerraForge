@@ -3,6 +3,9 @@
 #include <iostream>
 #include <algorithm> // For std::clamp, std::min, std::max
 
+#include "Dodo.h"
+#include "Troodon.h"
+
 /**
  * @brief Constructor for the Game class.
  * Initializes the window, loads resources (textures, sounds, fonts),
@@ -148,7 +151,7 @@ Game::Game()
     mRecipes.push_back({ItemID::FURNACE, 1, true, {{ItemID::STONE, 10}}});
     mRecipes.push_back({ItemID::CHEST, 1, true, {{ItemID::IRON_INGOT, 2}, {ItemID::WOOD, 5}}});
     mRecipes.push_back({ItemID::BOW, 1, true, {{ItemID::WOOD, 5}}});
-    mRecipes.push_back({ItemID::ARROW, 10, true, {{ItemID::WOOD, 5},{ItemID::STONE,5}}});
+    mRecipes.push_back({ItemID::ARROW, 10, true, {{ItemID::WOOD, 5}, {ItemID::STONE, 5}}});
 
     // Special Recipe: Boss Summoning Item
     mRecipes.push_back({ItemID::MEAT_MEDALLION, 1, true, {{ItemID::MEAT, 30}}});
@@ -156,7 +159,6 @@ Game::Game()
     // --- ITEM DATABASE (Defines weight and max stack for each item) ---
     // Blocks
     mItemDatabase[ItemID::DIRT] = {"Dirt", 1.0f, 99};
-    mItemDatabase[ItemID::GRASS] = {"Grass", 1.0f, 99};
     mItemDatabase[ItemID::STONE] = {"Stone", 2.0f, 99};
     mItemDatabase[ItemID::WOOD] = {"Log", 1.5f, 99};
     mItemDatabase[ItemID::LEAVES] = {"Leaves", 0.1f, 99};
@@ -206,11 +208,6 @@ Game::Game()
 
     // Special
     mItemDatabase[ItemID::MEAT_MEDALLION] = {"Meat Medallion", 10.0f, 1};
-
-    // Give starting items for testing
-    addItemToBackpack(CHEST, 1);
-    addItemToBackpack(IRON, 14);
-    addItemToBackpack(MEAT_MEDALLION,1);
 
     // --- LOAD ENTITY TEXTURES ---
     if (!mDodoTexture.loadFromFile("assets/Dodo.png")) std::cerr << "Error: Missing Dodo.png" << std::endl;
@@ -440,7 +437,6 @@ float getBlockHardness(int id) {
     switch (id) {
         case ItemID::AIR: return 0.0f;
         case ItemID::DIRT: return 0.2f;  // Fast break
-        case ItemID::GRASS: return 0.25f;
         case ItemID::WOOD: return 0.6f;
         case ItemID::LEAVES: return 0.1f;  // Instant break
         case ItemID::TORCH: return 0.1f;
@@ -620,7 +616,7 @@ void Game::update(sf::Time dt) {
         if (meatCount > 0) {
             int meatToLose = meatCount / 2;
             if (meatToLose > 0) {
-                consumeItem(50, meatToLose);
+                consumeItem(ItemID::MEAT, meatToLose);
                 std::cout << "You died and lost " << meatToLose << " pieces of meat." << std::endl;
             }
         }
@@ -963,7 +959,7 @@ void Game::update(sf::Time dt) {
                             while (mWorld.getBlock(mMiningPos.x, bottomY + 1) == ItemID::WOOD) bottomY++;
                             int blockUnder = mWorld.getBlock(mMiningPos.x, bottomY + 1);
 
-                            bool restsOnNature = (blockUnder == ItemID::DIRT || blockUnder == ItemID::GRASS || blockUnder == ItemID::SNOW);
+                            bool restsOnNature = (blockUnder == ItemID::DIRT || blockUnder == ItemID::SNOW);
 
                             // Find the top
                             int topY = mMiningPos.y;
@@ -1070,9 +1066,7 @@ void Game::update(sf::Time dt) {
             }
             // 4. Place Building Blocks
             else if (distance <= maxRange) {
-                bool isPlaceableBlock = ((mSelectedBlock >= ItemID::DIRT && mSelectedBlock <= ItemID::SNOW) ||
-                                          mSelectedBlock == ItemID::DOOR || mSelectedBlock == ItemID::CRAFTING_TABLE ||
-                                          mSelectedBlock == ItemID::FURNACE || mSelectedBlock == ItemID::CHEST);
+                bool isPlaceableBlock = (mSelectedBlock >= 1 && mSelectedBlock <= 99); // Todo bloque es colocable
 
                 // Blocks must be anchored to existing blocks
                 bool hasAdjacentBlock = (mWorld.getBlock(gridX - 1, gridY) != 0) ||
@@ -1233,7 +1227,7 @@ void Game::update(sf::Time dt) {
 
         // Clean up corpses and drop loot
         if (mob.isDead()) {
-            mWorld.spawnItem(50, mob.getPosition()); // Drop meat
+            mWorld.spawnItem(ItemID::MEAT, mob.getPosition()); // ¡Cambiado 50 por ItemID::MEAT!
             mSndBreak.setPitch(1.5f);
             mSndBreak.play();
             it = mMobs.erase(it);
@@ -2456,9 +2450,10 @@ void Game::handleMouseRelease(float mx, float my) {
                     else if (i == 2 && dragID == ItemID::WOOD_LEGS) allowed = true;
                     else if (i == 3 && dragID == ItemID::WOOD_BOOTS) allowed = true;
                 } else {
-                    if (i == 0 && (dragID == ItemID::MEAT || dragID == ItemID::TORCH || dragID == ItemID::MEAT_MEDALLION)) allowed = true;
-                    else if (i == 1 && (((dragID >= ItemID::DIRT && dragID <= ItemID::SNOW) && dragID != ItemID::TORCH) || dragID == ItemID::DOOR || dragID == ItemID::CRAFTING_TABLE || dragID == ItemID::FURNACE || dragID == ItemID::CHEST)) allowed = true;
-                    else if ((i == 2 || i == 3) && ((dragID >= ItemID::WOOD_PICKAXE && dragID <= ItemID::TUNGSTEN_PICKAXE) || (dragID >= ItemID::WOOD_SWORD && dragID <= ItemID::BOW))) allowed = true;
+                    // ¡MIRA QUÉ LIMPIO! Filtrado por rangos de IDs:
+                    if (i == 0 && (dragID >= 200 && dragID <= 299)) allowed = true; // Solo Usables (200-299)
+                    else if (i == 1 && (dragID >= 1 && dragID <= 99)) allowed = true; // Solo Bloques (1-99)
+                    else if ((i == 2 || i == 3) && ((dragID >= 100 && dragID <= 199) || (dragID >= 300 && dragID <= 399))) allowed = true; // Armas y Herramientas
                 }
 
                 if (allowed) {
@@ -2565,7 +2560,6 @@ void Game::spawnParticles(sf::Vector2f pos, int itemID, int count) {
     sf::Color pColor = sf::Color::White;
     switch(itemID) {
         case ItemID::DIRT: pColor = sf::Color(139, 69, 19); break;
-        case ItemID::GRASS: pColor = sf::Color(34, 139, 34); break;
         case ItemID::STONE: case ItemID::COAL:
         case ItemID::FURNACE: pColor = sf::Color(128, 128, 128); break;
         case ItemID::WOOD: case ItemID::CRAFTING_TABLE:

@@ -1,5 +1,6 @@
 #include "Projectile.h"
 #include <cmath>
+#include "Game.h"
 
 /**
  * @brief Constructs a Projectile object.
@@ -15,9 +16,9 @@ Projectile::Projectile(sf::Vector2f startPos, sf::Vector2f velocity, const sf::T
     // Origin centered for perfect rotation in the air
     mSprite.setOrigin(texture.getSize().x / 2.0f, texture.getSize().y / 2.0f);
     mSprite.setPosition(mPos);
-    
+
     // Scale it down to match the world visually
-    mSprite.setScale(0.8f, 0.8f); 
+    mSprite.setScale(0.8f, 0.8f);
 }
 
 /**
@@ -54,8 +55,7 @@ void Projectile::update(sf::Time dt, World& world) {
 
     // If the arrow hits a solid block
     if (World::isSolid(world.getBlock(gridX, gridY))) {
-        // Drop the arrow item (ID 36) back into the world so it can be picked up again
-        world.spawnItem(gridX, gridY, 36); 
+        world.spawnItem(gridX, gridY, ItemID::ARROW); // ¡Sustituido 36 por ItemID::ARROW!
         mIsDead = true; // Destroy the physical projectile
     }
 }

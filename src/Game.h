@@ -4,8 +4,6 @@
 #include <SFML/Audio.hpp>
 #include "Player.h"
 #include "World.h"
-#include "Dodo.h"
-#include "Troodon.h"
 #include <memory> // Necessary for unique_ptr
 #include <vector>
 #include <utility>
@@ -31,66 +29,63 @@ enum class GameState {
 enum ItemID {
     AIR = 0,
 
-    // Basic Blocks
+    // --- BLOQUES (1 - 99) ---
     DIRT = 1,
-    GRASS = 2,
-    STONE = 3,
-    WOOD = 4,
-    LEAVES = 5,
-    TORCH = 6,
-    SAND = 13,
-    SNOW = 14,
+    STONE = 2,
+    WOOD = 3,
+    LEAVES = 4,
+    TORCH = 5,
+    SAND = 6,
+    SNOW = 7,
+    BEDROCK = 8,
+    DOOR = 10,
+    DOOR_MID = 11,
+    DOOR_TOP = 12,
+    DOOR_OPEN = 13,
+    DOOR_OPEN_MID = 14,
+    DOOR_OPEN_TOP = 15,
+    CRAFTING_TABLE = 20,
+    FURNACE = 21,
+    CHEST = 22,
 
-    // Minerals
-    COAL = 7,
-    COPPER = 8,
-    IRON = 9,
-    COBALT = 10,
-    TUNGSTEN = 11,
-    BEDROCK = 12,
+    // --- ARMAS (100 - 199) ---
+    WOOD_SWORD = 100,
+    STONE_SWORD = 101,
+    IRON_SWORD = 102,
+    TUNGSTEN_SWORD = 103,
+    BOW = 110,
+    ARROW = 111,
 
-    // Tools
-    WOOD_PICKAXE = 21,
-    STONE_PICKAXE = 22,
-    IRON_PICKAXE = 23,
-    TUNGSTEN_PICKAXE = 24,
+    // --- ÍTEMS USABLES / CONSUMIBLES (200 - 299) ---
+    MEAT = 200,
+    MEAT_MEDALLION = 201,
 
-    // Weapons
-    WOOD_SWORD = 31,
-    STONE_SWORD = 32,
-    IRON_SWORD = 33,
-    TUNGSTEN_SWORD = 34,
-    BOW = 35,       // <--- NEW: Bow
-    ARROW = 36,     // <--- NEW: Arrow
+    // --- HERRAMIENTAS (300 - 399) ---
+    WOOD_PICKAXE = 300,
+    STONE_PICKAXE = 301,
+    IRON_PICKAXE = 302,
+    TUNGSTEN_PICKAXE = 303,
 
-    // Structures and Doors
-    DOOR = 25,
-    DOOR_MID = 26,
-    DOOR_TOP = 27,
-    DOOR_OPEN = 28,
-    DOOR_OPEN_MID = 29,
-    DOOR_OPEN_TOP = 30,
+    // --- ARMADURAS (400 - 499) ---
+    WOOD_HELMET = 400,
+    WOOD_CHEST = 401,
+    WOOD_LEGS = 402,
+    WOOD_BOOTS = 403,
 
-    CRAFTING_TABLE = 40,
-    FURNACE = 41,
-    CHEST = 42,
+    // --- MATERIALES / MINERALES (500 - 599) ---
+    COAL = 500,
+    COPPER = 501,
+    IRON = 502,
+    COBALT = 503,
+    TUNGSTEN = 504,
+    COPPER_INGOT = 510,
+    IRON_INGOT = 511,
+    COBALT_INGOT = 512,
+    TUNGSTEN_INGOT = 513,
 
-    // Consumables
-    MEAT = 50,
-
-    // Ingots
-    IRON_INGOT = 51,
-    COPPER_INGOT = 52,
-    COBALT_INGOT = 53,
-    TUNGSTEN_INGOT = 54,
-
-    // --- NEW: ARMOR ---
-    WOOD_HELMET = 61,
-    WOOD_CHEST = 62,
-    WOOD_LEGS = 63,
-    WOOD_BOOTS = 64,
-
-    MEAT_MEDALLION = 70
+    // --- PAREDES DE FONDO (600 - 699) ---
+    BG_DIRT = 600,
+    BG_STONE = 601
 };
 
 /**

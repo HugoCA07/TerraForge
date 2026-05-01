@@ -1,7 +1,6 @@
 #pragma once
 #include "Mob.h"
 #include "World.h"
-
 /**
  * @class Troodon
  * @brief An aggressive, nocturnal dinosaur mob.

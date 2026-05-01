@@ -1,4 +1,5 @@
 #include "Boss.h"
+#include "Game.h"
 
 /**
  * @brief Constructs a Boss object by extending the base Mob class.

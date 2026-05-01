@@ -1,6 +1,7 @@
 #include "Dodo.h"
 #include <cmath>
 #include <iostream>
+#include "Game.h"
 
 /**
  * @brief Constructor for the Dodo.

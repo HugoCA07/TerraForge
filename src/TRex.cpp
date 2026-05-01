@@ -1,6 +1,7 @@
 #include "TRex.h"
 #include <cmath>
 #include <iostream>
+#include "Game.h"
 
 TRex::TRex(sf::Vector2f startPos, const sf::Texture& texture)
     : Boss(startPos, texture, 1000, "T-REX ALFA")

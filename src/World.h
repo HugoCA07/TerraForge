@@ -2,8 +2,7 @@
 #include <SFML/Graphics.hpp>
 #include <map>
 #include <vector>
-#include <cmath>
-#include <fstream>
+
 
 // World generation constants
 const int CHUNK_WIDTH = 16;
@@ -103,11 +102,7 @@ public:
      * @param blockID The ID of the block to check.
      * @return True if the block is solid (collidable), false if passable (Air, Wood background, Open doors).
      */
-    static bool isSolid(int blockID) {
-        // Air(0), Wood/Trunks(4), Leaves(5), Torches(6), Open Doors(28,29,30) are passable.
-        return (blockID != 0 && blockID != 4 && blockID != 5 && blockID != 6 &&
-            blockID != 28 && blockID != 29 && blockID != 30);
-    }
+    static bool isSolid(int blockID);
 
 private:
     /**
@@ -139,4 +134,7 @@ private:
 
     // Dynamic Entities
     std::vector<ItemDrop> mItems;
+    // --- NUEVO: SISTEMA DE AUTOTILING ---
+    std::map<int, sf::Texture> mAutotileTextures; // Guarda las texturas inteligentes
+    int getBitmask(int x, int y, int targetID);
 };

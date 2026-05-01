@@ -1,4 +1,5 @@
 #include "Mob.h"
+#include "Game.h"
 
 /**
  * @brief Constructor for the Mob class.

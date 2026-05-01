@@ -3,6 +3,8 @@
 #include <cmath>
 #include <algorithm> // For std::min
 
+#include "Game.h"
+
 /**
  * @brief Constructor for the Player class.
  * Initializes attributes, loads textures, and configures sprites.
@@ -119,8 +121,8 @@ void Player::update(sf::Time dt, World& world) {
     // ==========================================
     // 1.5 WEAPON VISUALS (CHOREOGRAPHY & IDLE)
     // ==========================================
-    bool isHoldingMelee = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 24) || (mEquippedWeaponID >= 31 && mEquippedWeaponID <= 34);
-    bool isHoldingBow = (mEquippedWeaponID == 35);
+    bool isHoldingMelee = (mEquippedWeaponID >= 300 && mEquippedWeaponID <= 399) || (mEquippedWeaponID >= 100 && mEquippedWeaponID <= 109);
+    bool isHoldingBow = (mEquippedWeaponID == ItemID::BOW);
 
     if (isHoldingMelee || isHoldingBow) {
         const sf::Texture* tex = world.getHeldTexture(mEquippedWeaponID);
@@ -256,7 +258,7 @@ void Player::update(sf::Time dt, World& world) {
     }
 
     // Decide animation based on movement and equipped weapon
-    bool hasWeaponAnim = (mEquippedWeaponID >= 21 && mEquippedWeaponID <= 35);
+    bool hasWeaponAnim = (mEquippedWeaponID >= 100 && mEquippedWeaponID <= 199) || (mEquippedWeaponID >= 300 && mEquippedWeaponID <= 399);
     mCurrentState = (std::abs(mVelocity.x) > 10.0f) ? AnimState::Walk : AnimState::Idle;
     mCurrentRow = (mCurrentState == AnimState::Idle) ? (hasWeaponAnim ? 2 : 0) : (hasWeaponAnim ? 3 : 1);
 

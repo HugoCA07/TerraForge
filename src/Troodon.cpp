@@ -1,5 +1,6 @@
 #include "Troodon.h"
 #include <cmath>
+#include "Game.h"
 
 /**
  * @brief Constructor for the Troodon.
