@@ -1,14 +1,37 @@
+# =========================
+# TERRAFORGE .gitignore
+# =========================
+
+# 1. Archivos Compilados y Binarios
 *.exe
+*.dll
 *.o
 *.obj
-*.pdb
-*.ilk
-*.idb
-/build/
-/x64/
-/Debug/
-/Release/
+*.a
+*.lib
+*.so
+*.dylib
 
+# 2. Carpetas de Compilación (CMake)
+build/
+cmake-build-*/
+out/
+bin/
+
+# 3. Entornos de Desarrollo (IDE)
+.idea/
+.vs/
+*.user
+*.suo
+*.code-workspace
+CLAUDE.md
+
+# 4. Archivos Temporales y Caché
+*.log
+*.tmp
+.DS_Store
+
+# 5. SEGURIDAD Y DATOS DEL JUGADOR
+# ¡NUNCA subir partidas guardadas al repositorio público!
 savegame.dat
-
-claude.md
+*.dat
