@@ -253,7 +253,7 @@ void World::generateChunk(int chunkX) {
     spawnVein(1, ItemID::TUNGSTEN, 130, 150, 40);
 
     // ---------------------------------------------------------
-    // STEP 3: SURFACE DECORATION (Trees)
+    // STEP 3: SURFACE DECORATIONS (Trees)
     // ---------------------------------------------------------
     for (int localX = 0; localX < CHUNK_WIDTH; ++localX) {
         int globalX = (chunkX * CHUNK_WIDTH) + localX;
@@ -261,31 +261,59 @@ void World::generateChunk(int chunkX) {
 
         int surfaceBlockID = newChunk[surfaceY * CHUNK_WIDTH + localX];
 
-        // Trees only grow on DIRT (ID 1)
-        if (surfaceBlockID == ItemID::DIRT && (std::abs(globalX * 437) % 100) < 10 && localX > 2 && localX < CHUNK_WIDTH - 3) {
-            int treeHeight = 5 + (rand() % 11);
-            int treeTopY = surfaceY - treeHeight;
+        // Mantenemos la comprobación base pero le damos margen (localX > 4)
+        if (surfaceBlockID == ItemID::DIRT && (std::abs(globalX * 437) % 100) < 10 && localX > 4 && localX < CHUNK_WIDTH - 5) {
 
-            // Generate Leaves (Canopy)
-            for (int lx = -2; lx <= 2; ++lx) {
-                for (int ly = -2; ly <= 1; ++ly) {
-                    // Shave corners to create an oval/rounded shape instead of a square
-                    if (std::abs(lx) == 2 && std::abs(ly) == 2) continue;
+            // 1. Altura del tronco (entre 6 y 14 bloques para que sea alto)
+        int trunkHeight = 6 + (rand() % 9);
+        int trunkTopY = surfaceY - trunkHeight;
 
-                    int leafY = treeTopY + ly;
-                    int leafX = localX + lx;
-                    if (leafY > 0 && leafY < WORLD_HEIGHT) {
-                        int idx = leafY * CHUNK_WIDTH + leafX;
-                        // Don't overwrite existing blocks with leaves
-                        if (newChunk[idx] == ItemID::AIR) newChunk[idx] = ItemID::LEAVES;
+        // 2. Generar el Tronco Principal (Madera recta)
+        for (int i = 1; i <= trunkHeight; ++i) {
+            int y = surfaceY - i;
+            if (y > 0) newChunk[y * CHUNK_WIDTH + localX] = ItemID::WOOD;
+        }
+
+        // --- Función auxiliar para dibujar "bolas" de hojas limpias ---
+        auto drawLeaves = [&](int cx, int cy, int radius) {
+            for (int lx = -radius; lx <= radius; ++lx) {
+                for (int ly = -radius; ly <= radius; ++ly) {
+                    // Cortar esquinas para hacer la forma de cruz gruesa/círculo
+                    if (std::abs(lx) == radius && std::abs(ly) == radius) continue;
+
+                    int px = cx + lx;
+                    int py = cy + ly;
+
+                    // Límites de seguridad
+                    if (py > 0 && py < WORLD_HEIGHT && px >= 0 && px < CHUNK_WIDTH) {
+                        int idx = py * CHUNK_WIDTH + px;
+                        // Solo colocar hojas si hay aire
+                        if (newChunk[idx] == ItemID::AIR) {
+                            newChunk[idx] = ItemID::LEAVES;
+                        }
                     }
                 }
             }
-            // Generate Trunk (Wood)
-            for (int i = 1; i <= treeHeight; ++i) {
-                int trunkY = surfaceY - i;
-                if (trunkY > 0) newChunk[trunkY * CHUNK_WIDTH + localX] = ItemID::WOOD;
+        };
+
+        // 3. Copa Principal (Posada JUSTO encima del tronco)
+        // Al restar 3, garantizamos que la parte inferior de la copa (que baja 2 bloques)
+        // quede exactamente 1 bloque por encima de trunkTopY.
+        int canopyCenterY = trunkTopY - 3;
+        drawLeaves(localX, canopyCenterY, 2);
+
+        // Le añadimos 3 bloquecitos extra justo arriba para redondear la copa
+        // El borde superior del círculo está a canopyCenterY - 2, así que ponemos esto en - 3.
+        int extraLeavesY = canopyCenterY - 3;
+        if (extraLeavesY > 0) {
+            for (int ox = -1; ox <= 1; ++ox) {
+                int topX = localX + ox;
+                if (topX >= 0 && topX < CHUNK_WIDTH) {
+                    int topIdx = extraLeavesY * CHUNK_WIDTH + topX;
+                    if (newChunk[topIdx] == ItemID::AIR) newChunk[topIdx] = ItemID::LEAVES;
+                }
             }
+        }
         }
     }
 
@@ -760,6 +788,10 @@ void World::loadTextures() {
     if (!mAutotileTextures[ItemID::DIRT].loadFromFile("assets/dirt_autotile.png")) {
         std::cerr << "Error: Faltan las texturas de autotiling de la Tierra" << std::endl;
     }
+
+    if (!mAutotileTextures[ItemID::LEAVES].loadFromFile("assets/leaves_autotile.png")) {
+        std::cerr << "Error: Faltan las texturas de autotiling de las Hojas" << std::endl;
+    }
 }
 
 // ==========================================
@@ -821,17 +853,17 @@ int World::getBitmask(int x, int y, int targetID) {
     int bottom = getBlock(x, y + 1);
     int left   = getBlock(x - 1, y);
 
-    // --- NUEVO: REGLAS DE FUSIÓN ENTRE DISTINTOS BLOQUES ---
+    // --- NUEVO: REGLAS DE FUSIÓN ENTRE DISTINTOS BLOQUES ----
     auto connects = [&](int neighbor) {
         // 1. Siempre nos conectamos perfectamente con nosotros mismos
         if (neighbor == targetID) return true;
 
-        // 2. Regla de la Tierra: Se fusiona con la Piedra, Bedrock y los Minerales
-        if (targetID == ItemID::DIRT) {
-            if (neighbor == ItemID::STONE || neighbor == ItemID::BEDROCK ||
-               (neighbor >= ItemID::COAL && neighbor <= ItemID::TUNGSTEN)) {
+        // 2. Regla de la Tierra y Hojas: Se fusionan con TODOS los bloques
+        if (targetID == ItemID::DIRT || targetID == ItemID::LEAVES) {
+            // Se fusionan con cualquier cosa que NO sea Aire y NO sea una Antorcha
+            if (neighbor != ItemID::AIR && neighbor != ItemID::TORCH) {
                 return true;
-               }
+            }
         }
 
         // (En el futuro, si haces Autotile para la Piedra, añadirás su regla aquí)

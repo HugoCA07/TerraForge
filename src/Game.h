@@ -324,10 +324,23 @@ private:
 
     GameState mGameState = GameState::MainMenu;
 
-    // Main Menu Texts
+    // --- MAIN MENU SYSTEM ---
+    enum class MenuScreen { Main, PlaySelect };
+    MenuScreen mCurrentMenuScreen = MenuScreen::Main;
+
     sf::Text mMenuTitleText;
+
+    // Textos del Menú Principal
     sf::Text mMenuPlayText;
+    sf::Text mMenuSettingsText;
+    sf::Text mMenuCreditsText;
     sf::Text mMenuExitText;
+
+    // Textos del Submenú Jugar
+    sf::Text mMenuNewGameText;
+    sf::Text mMenuLoadGameText;
+    sf::Text mMenuBackText;
+
     sf::Text mPauseTitleText;
 
     // --- NEW: CINEMATIC SYSTEM ---

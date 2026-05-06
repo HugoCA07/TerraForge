@@ -222,7 +222,7 @@ Game::Game()
         mWheelSprite.setScale(2.0f, 2.0f);
     }
 
-    // --- UI TEXT CONFIGURATION ---
+    // --- UI TEXT CONFIGURATION (MAIN MENU) ---
     mMenuTitleText.setFont(mFont);
     mMenuTitleText.setString("TERRAFORGE");
     mMenuTitleText.setCharacterSize(120);
@@ -233,51 +233,49 @@ Game::Game()
     mMenuTitleText.setOrigin(titleBoundsMenu.width / 2.0f, titleBoundsMenu.height / 2.0f);
     mMenuTitleText.setPosition(1920 / 2.0f, 300.0f);
 
-    mMenuPlayText.setFont(mFont);
-    mMenuPlayText.setString("> PLAY <");
-    mMenuPlayText.setCharacterSize(60);
-    mMenuPlayText.setFillColor(sf::Color::White);
-    mMenuPlayText.setOutlineColor(sf::Color::Black);
-    mMenuPlayText.setOutlineThickness(3.0f);
-    sf::FloatRect playBounds = mMenuPlayText.getLocalBounds();
-    mMenuPlayText.setOrigin(playBounds.width / 2.0f, playBounds.height / 2.0f);
-    mMenuPlayText.setPosition(1920 / 2.0f, 600.0f);
+    // Esta lambda nos ahorra repetir 10 líneas de código por cada botón
+    auto createMenuButton = [&](sf::Text& textObj, const std::string& str, float yPos, int size = 60) {
+        textObj.setFont(mFont);
+        textObj.setString(str);
+        textObj.setCharacterSize(size);
+        textObj.setFillColor(sf::Color::White);
+        textObj.setOutlineColor(sf::Color::Black);
+        textObj.setOutlineThickness(3.0f);
+        sf::FloatRect bounds = textObj.getLocalBounds();
+        textObj.setOrigin(bounds.width / 2.0f, bounds.height / 2.0f);
+        textObj.setPosition(1920 / 2.0f, yPos);
+    };
 
-    mMenuExitText.setFont(mFont);
-    mMenuExitText.setString("> EXIT <");
-    mMenuExitText.setCharacterSize(60);
-    mMenuExitText.setFillColor(sf::Color::White);
-    mMenuExitText.setOutlineColor(sf::Color::Black);
-    mMenuExitText.setOutlineThickness(3.0f);
-    sf::FloatRect exitBounds = mMenuExitText.getLocalBounds();
-    mMenuExitText.setOrigin(exitBounds.width / 2.0f, exitBounds.height / 2.0f);
-    mMenuExitText.setPosition(1920 / 2.0f, 750.0f);
+    // --- Inicializamos los botones de la pantalla PRINCIPAL ---
+    createMenuButton(mMenuPlayText, "> JUGAR <", 550.0f);
+    createMenuButton(mMenuSettingsText, "AJUSTES", 650.0f, 40);
+    createMenuButton(mMenuCreditsText, "CREDITOS", 730.0f, 40);
+    createMenuButton(mMenuExitText, "SALIR", 810.0f, 40);
 
-    // Pause Menu Text
-    mPauseTitleText = mDeathTitleText;
-    mPauseTitleText.setString("PAUSED");
-    mPauseTitleText.setFillColor(sf::Color::White);
-    sf::FloatRect pauseBounds = mPauseTitleText.getLocalBounds();
-    mPauseTitleText.setOrigin(pauseBounds.width / 2.0f, pauseBounds.height / 2.0f);
+    // --- Inicializamos los botones del submenú de SELECCIÓN DE PARTIDA ---
+    // --- Inicializamos los botones del submenú de SELECCIÓN DE PARTIDA ---
+    createMenuButton(mMenuNewGameText, "> NUEVA PARTIDA <", 550.0f);
+    createMenuButton(mMenuLoadGameText, "> CARGAR PARTIDA <", 650.0f);
+    createMenuButton(mMenuBackText, "VOLVER", 800.0f, 40);
 
-    // --- CINEMATIC TEXTS ---
+    // ==========================================
+    // --- TEXTOS DE LA CINEMÁTICA DE INTRODUCCIÓN ---
+    // ==========================================
     mCinematicTextYear.setFont(mFont);
-    mCinematicTextYear.setString("Year 3808...");
+    mCinematicTextYear.setString("YEAR 3093...");
     mCinematicTextYear.setCharacterSize(60);
-    mCinematicTextYear.setFillColor(sf::Color(0, 255, 0, 0)); // Starts fully transparent
-
-    mCinematicTextPlanet.setFont(mFont);
-    mCinematicTextPlanet.setString("Planet XTR-0051");
-    mCinematicTextPlanet.setCharacterSize(80);
-    mCinematicTextPlanet.setFillColor(sf::Color(0, 255, 0, 0));
-
+    mCinematicTextYear.setFillColor(sf::Color(0, 255, 0, 0)); // Transparente al inicio
     sf::FloatRect yearBounds = mCinematicTextYear.getLocalBounds();
     mCinematicTextYear.setOrigin(yearBounds.width / 2.0f, yearBounds.height / 2.0f);
     mCinematicTextYear.setPosition(1920 / 2.0f, 1080 / 2.0f - 50.0f);
 
+    mCinematicTextPlanet.setFont(mFont);
+    mCinematicTextPlanet.setString("PLANET XPR-093");
+    mCinematicTextPlanet.setCharacterSize(80);
+    mCinematicTextPlanet.setFillColor(sf::Color(0, 255, 0, 0)); // Transparente al inicio
     sf::FloatRect planetBounds = mCinematicTextPlanet.getLocalBounds();
     mCinematicTextPlanet.setOrigin(planetBounds.width / 2.0f, planetBounds.height / 2.0f);
-    mCinematicTextPlanet.setPosition(1920 / 2.0f, 1080 / 2.0f + 50.0f);
+    mCinematicTextPlanet.setPosition(1920 / 2.0f, 1080 / 2.0f + 60.0f);
 
     // --- LOAD CAPSULE ASSET ---
     if (!mCapsuleTexture.loadFromFile("assets/Capsule.png")) {
@@ -350,18 +348,33 @@ void Game::processEvents() {
             sf::Vector2i mousePos = sf::Mouse::getPosition(mWindow);
             sf::Vector2f worldPos = mWindow.mapPixelToCoords(mousePos, mWindow.getDefaultView());
 
-            if (mMenuPlayText.getGlobalBounds().contains(worldPos)) {
-                // Initiate Cinematic Sequence
-                mGameState = GameState::IntroCinematic;
-                mCinematicTimer = 0.0f;
-                mCinematicPhase = 0;
-
-                // Spawn capsule high up and far left for a diagonal meteor crash
-                float finalX = 100 * mWorld.getTileSize();
-                mCapsulePos = sf::Vector2f(finalX - 3000.0f, -3000.0f);
-                mCameraPos = mCapsulePos; // Force camera to follow the capsule
+            if (mCurrentMenuScreen == MenuScreen::Main) {
+                if (mMenuPlayText.getGlobalBounds().contains(worldPos)) mCurrentMenuScreen = MenuScreen::PlaySelect; // Abre el submenú
+                else if (mMenuSettingsText.getGlobalBounds().contains(worldPos)) { std::cout << "Ajustes proximamente...\n"; }
+                else if (mMenuCreditsText.getGlobalBounds().contains(worldPos)) { std::cout << "Creditos proximamente...\n"; }
+                else if (mMenuExitText.getGlobalBounds().contains(worldPos)) mWindow.close();
             }
-            if (mMenuExitText.getGlobalBounds().contains(worldPos)) mWindow.close();
+            else if (mCurrentMenuScreen == MenuScreen::PlaySelect) {
+                if (mMenuNewGameText.getGlobalBounds().contains(worldPos)) {
+                    // INICIAR NUEVA PARTIDA (Cinemática)
+                    mGameState = GameState::IntroCinematic;
+                    mCinematicTimer = 0.0f;
+                    mCinematicPhase = 0;
+                    float finalX = 100 * mWorld.getTileSize();
+                    mCapsulePos = sf::Vector2f(finalX - 3000.0f, -3000.0f);
+                    mCameraPos = mCapsulePos; // La cámara sigue a la cápsula
+                }
+                else if (mMenuLoadGameText.getGlobalBounds().contains(worldPos)) {
+                    // CARGAR PARTIDA (Salta la cinemática directo a jugar)
+                    loadGame();
+                    // Forzamos a la cámara a ir donde está el jugador al cargar
+                    mCameraPos = mPlayer.getPosition();
+                    mGameState = GameState::Playing;
+                }
+                else if (mMenuBackText.getGlobalBounds().contains(worldPos)) {
+                    mCurrentMenuScreen = MenuScreen::Main; // Volver atrás
+                }
+            }
         }
 
         // --- PAUSE MENU INTERACTION ---
@@ -964,32 +977,49 @@ void Game::update(sf::Time dt) {
                             // Find the top
                             int topY = mMiningPos.y;
                             while (mWorld.getBlock(mMiningPos.x, topY - 1) == ItemID::WOOD) topY--;
-                            bool hasLeavesOnTop = (mWorld.getBlock(mMiningPos.x, topY - 1) == ItemID::LEAVES);
+
+                            // Comprobamos si hay hojas justo encima del tronco
+                            bool hasLeavesOnTop = (mWorld.getBlock(mMiningPos.x, topY - 1) == ItemID::LEAVES || mWorld.getBlock(mMiningPos.x, topY - 2) == ItemID::LEAVES);
 
                             if (restsOnNature && hasLeavesOnTop) isTree = true;
 
                             if (isTree) {
-                                // Break upwards recursively
+                                // Romper hacia arriba recursivamente por la columna central
                                 int currY = mMiningPos.y;
-                                while (mWorld.getBlock(mMiningPos.x, currY) == ItemID::WOOD || mWorld.getBlock(mMiningPos.x, currY) == ItemID::LEAVES) {
-                                    int currentBlock = mWorld.getBlock(mMiningPos.x, currY);
-                                    mWorld.setBlock(mMiningPos.x, currY, 0);
-                                    mWorld.spawnItem(mMiningPos.x, currY, currentBlock);
 
-                                    // Clear surrounding leaves
-                                    for(int ox = -2; ox <= 2; ++ox) {
-                                        for(int oy = -2; oy <= 2; ++oy) {
-                                            if(mWorld.getBlock(mMiningPos.x + ox, currY + oy) == ItemID::LEAVES) {
+                                while (mWorld.getBlock(mMiningPos.x, currY) == ItemID::WOOD || mWorld.getBlock(mMiningPos.x, currY) == ItemID::LEAVES) {
+
+                                    int currentBlock = mWorld.getBlock(mMiningPos.x, currY);
+
+                                    // 1. Destruimos el bloque central donde estamos pisando
+                                    mWorld.setBlock(mMiningPos.x, currY, 0);
+
+                                    if (currentBlock == ItemID::WOOD) {
+                                        mWorld.spawnItem(mMiningPos.x, currY, currentBlock);
+                                    }
+
+                                    // 2. Limpiar laterales (Radio ampliado para copas grandes)
+                                    for(int ox = -3; ox <= 3; ++ox) {
+
+                                        // ¡LA CLAVE! Ignoramos la columna central para no destruir nuestro puente hacia arriba
+                                        if (ox == 0) continue;
+
+                                        for(int oy = -3; oy <= 3; ++oy) {
+                                            int nid = mWorld.getBlock(mMiningPos.x + ox, currY + oy);
+
+                                            // Romper hojas atrapadas
+                                            if(nid == ItemID::LEAVES) {
                                                 mWorld.setBlock(mMiningPos.x + ox, currY + oy, 0);
-                                                // 15% sapling drop rate
+                                                // 15% de probabilidad de dropear hoja
                                                 if (rand() % 100 < 15) mWorld.spawnItem(mMiningPos.x + ox, currY + oy, ItemID::LEAVES);
                                             }
                                         }
                                     }
+                                    // 3. Damos el paso hacia arriba
                                     currY--;
                                 }
                             } else {
-                                // Just a placed wooden block
+                                // Solo era un bloque de madera puesto por el jugador (una pared de una casa, etc)
                                 mWorld.setBlock(mMiningPos.x, mMiningPos.y, 0);
                                 mWorld.spawnItem(mMiningPos.x, mMiningPos.y, brokenBlockID);
                             }
@@ -1302,8 +1332,18 @@ void Game::render() {
         mWindow.draw(mSkySprite);
 
         mWindow.draw(mMenuTitleText);
-        mWindow.draw(mMenuPlayText);
-        mWindow.draw(mMenuExitText);
+
+        // Dibuja los botones dependiendo de la pantalla actual
+        if (mCurrentMenuScreen == MenuScreen::Main) {
+            mWindow.draw(mMenuPlayText);
+            mWindow.draw(mMenuSettingsText);
+            mWindow.draw(mMenuCreditsText);
+            mWindow.draw(mMenuExitText);
+        } else if (mCurrentMenuScreen == MenuScreen::PlaySelect) {
+            mWindow.draw(mMenuNewGameText);
+            mWindow.draw(mMenuLoadGameText);
+            mWindow.draw(mMenuBackText);
+        }
     }
     else if (mGameState == GameState::IntroCinematic) {
         if (mCinematicPhase == 0 || mCinematicPhase == 1) {
